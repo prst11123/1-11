@@ -27,6 +27,7 @@ async def expiration_worker(h: AppHandler):
             n+=1
             if n % max(1,int(86400/h.cfg.expiration_sweep_seconds)) == 0:
                 await h.db("prune_receipts",30)
+                await h.db("prune_inline",14)
         except asyncio.CancelledError:
             raise
         except Exception:

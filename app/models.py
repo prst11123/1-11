@@ -146,3 +146,26 @@ class AppSetting(Base):
     value: Mapped[str] = mapped_column(String(256), nullable=False)
     updated_by: Mapped[int | None] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
+
+
+class InlineOffer(Base):
+    """An inline DEMO offer template, shared only by the sender's selections."""
+    __tablename__ = "inline_offers"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    gift_url: Mapped[str] = mapped_column(String(400), nullable=False)
+    gift_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    stars_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    __table_args__ = (Index("ix_inline_offers_expiry", "expires_at"),)
+
+
+class InlineMessageState(Base):
+    """Each selected inline message has its own status, even when a result is re-used."""
+    __tablename__ = "inline_message_states"
+    inline_message_id: Mapped[str] = mapped_column(String(512), primary_key=True)
+    inline_offer_id: Mapped[int] = mapped_column(Integer, ForeignKey("inline_offers.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    __table_args__ = (Index("ix_inline_states_offer", "inline_offer_id"),)

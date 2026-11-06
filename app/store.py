@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .config import Settings
 from .db import Database
-from .models import User, BusinessConnection, BusinessChat, Offer, OfferEvent, Recipient, AdminAudit, UserFlow, ProcessedUpdate, CallbackReceipt, AppSetting
+from .models import User, BusinessConnection, BusinessChat, Offer, OfferEvent, Recipient, AdminAudit, UserFlow, ProcessedUpdate, CallbackReceipt, AppSetting, InlineOffer, InlineMessageState
 from .states import (utcnow, aware, assert_transition, ACTION_EVENT, OFFER_TRANSITIONS, validate_gift_url, parse_stars, parse_duration)
 
 
@@ -374,6 +374,13 @@ class Store:
             return bool(a and a.allowed and not a.blocked and bc and bc.active and
                         bc.owner_user_id == actor and ch and self._can_send(ch, bc))
 
+    def can_delete_business_source(self, owner_id: int, connection_id: str) -> bool:
+        with self.db.transaction() as s:
+            bc = s.scalar(select(BusinessConnection).where(
+                BusinessConnection.business_connection_id == connection_id))
+            return bool(bc and bc.active and bc.owner_user_id == owner_id and
+                        bc.permissions.get("can_delete_all_messages"))
+
     def business_offer_by_source(self, connection_id: str, chat_id: int, message_id: int):
         with self.db.transaction() as s:
             return s.scalar(select(Offer).where(Offer.business_connection_id == connection_id,
@@ -636,3 +643,73 @@ class Store:
         with self.db.transaction() as s:
             s.execute(delete(ProcessedUpdate).where(ProcessedUpdate.created_at < threshold))
             s.execute(delete(CallbackReceipt).where(CallbackReceipt.created_at < threshold))
+
+    def create_inline_offer(self, creator: int, offer_data: dict):
+        """Create a shareable DEMO template for a valid, authorized inline query."""
+        with self.db.transaction() as s:
+            actor = s.get(User, creator)
+            if not actor or not actor.allowed or actor.blocked:
+                raise DomainError("Нет доступа к созданию inline-оферов")
+            obj = InlineOffer(
+                creator_id=creator,
+                gift_url=validate_gift_url(offer_data["gift_url"]),
+                gift_name=str(offer_data["gift_name"])[:150],
+                stars_amount=parse_stars(str(offer_data["stars"])),
+                expires_at=utcnow()+timedelta(minutes=parse_duration(str(offer_data["duration"]))),
+                created_at=utcnow())
+            s.add(obj)
+            s.flush()
+            return obj
+
+    def inline_action(self, offer_id: int, message_id: str, action: str):
+        """Apply a DEMO status transition to one chosen inline message atomically."""
+        if not message_id or len(message_id) > 512:
+            raise DomainError("Некорректное inline-сообщение")
+        if action not in {"accept", "decline", "transfer", "instructions"}:
+            raise DomainError("Неизвестная кнопка")
+        with self.db.transaction() as s:
+            offer = s.get(InlineOffer, offer_id)
+            if not offer:
+                raise DomainError("Тестовый офер не найден")
+            row = s.execute(select(InlineMessageState).where(
+                InlineMessageState.inline_message_id == message_id).with_for_update()).scalar_one_or_none()
+            if row is not None and row.inline_offer_id != offer_id:
+                raise DomainError("Несовпадение inline-сообщения")
+            if row is None:
+                row = InlineMessageState(inline_message_id=message_id,
+                                         inline_offer_id=offer_id, status="active",updated_at=utcnow())
+                s.add(row)
+            current = row.status
+            if current == "active" and aware(offer.expires_at) <= utcnow():
+                row.status = "expired"
+            elif action != "instructions":
+                if action == "transfer" and current == "accepted":
+                    row.status = "transfer_requested"
+                elif action in {"accept", "decline"} and current == "active":
+                    row.status = "accepted" if action == "accept" else "declined"
+                elif (action == "accept" and current == "accepted") or (action == "decline" and current == "declined") or (action == "transfer" and current == "transfer_requested"):
+                    pass  # safe retry if Telegram edit failed
+                else:
+                    raise DomainError("Действие уже недоступно")
+            row.updated_at = utcnow()
+            return offer, row.status
+
+    def prune_inline(self, days: int = 14):
+        """Discard expired inline templates only after a generous editing window."""
+        limit = utcnow() - timedelta(days=days)
+        with self.db.transaction() as s:
+            ids = select(InlineOffer.id).where(InlineOffer.expires_at < limit)
+            s.execute(delete(InlineMessageState).where(InlineMessageState.inline_offer_id.in_(ids)))
+            s.execute(delete(InlineOffer).where(InlineOffer.expires_at < limit))
+
+
+    def diagnostics(self, uid: int) -> dict:
+        """Local connection/send readiness for owners and admins only."""
+        with self.db.transaction() as s:
+            self._require_admin(s,uid)
+            chats=self._eligible_chats(s,uid)
+            connections={bc.business_connection_id: bc for _,bc in chats}
+            return {"known_chats":len(chats),
+                    "eligible_chats":sum(self._can_send(c,bc) for c,bc in chats),
+                    "active_connections_in_known_chats":len(connections),
+                    "with_delete_right":sum(bool(bc.permissions.get("can_delete_all_messages")) for bc in connections.values())}

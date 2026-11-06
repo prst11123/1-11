@@ -17,7 +17,7 @@ from . import keyboards as kb
 from . import render as rnd
 from .services.transfer import DemoTransferGateway
 from .quick_offer import parse_quick_offer
-from .gift_images import fetch_gift_image, GiftImageUnavailable
+from .gift_images import fetch_gift_image, GiftImageUnavailable, image_url
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +62,8 @@ class AppHandler:
                         await self.on_business_quick_offer(msg)
             elif "deleted_business_messages" in update:
                 await self.db("business_deleted",update["deleted_business_messages"])
+            elif "inline_query" in update:
+                await self.on_inline_query(update["inline_query"])
             elif "message" in update:
                 await self.on_message(update["message"])
             elif "callback_query" in update:
@@ -132,9 +134,16 @@ class AppHandler:
         if o.delivery_status != "sending":
             return
         try:
-            await self.send_offer(o, image_data=image_data, reply_to_message_id=source_id)
+            await self.send_offer(o, image_data=image_data, reply_to_message_id=source_id,
+                                  prefer_edit_source=True, source_kind=(media_kind if supplied else "text"))
         except (DomainError, TelegramError) as e:
-            await self._notify_owner(actor, f"❌ Не удалось отправить DEMO Offer: {rnd.h(e)}")
+            fresh = await self.db("offer",o.id)
+            if fresh and fresh.delivery_status == "unknown":
+                await self._notify_owner(actor,
+                    "⚠️ Неясный результат Telegram API. Проверьте этот чат перед новой попыткой: "
+                    "сообщение могло уже измениться. Автоматически не дублирую офер.")
+            else:
+                await self._notify_owner(actor, f"❌ Не удалось отправить DEMO Offer: {rnd.h(e)}")
 
     async def _notify_owner(self, user_id: int, text: str):
         try:
@@ -157,7 +166,13 @@ class AppHandler:
             if user.blocked:
                 await self.say(uid,"⛔ Ваш аккаунт заблокирован")
             elif user.allowed:
-                await self.say(uid,"🧪 <b>DEMO NFT Gift Offer</b>\n\nСоздание и отправка предложений через Telegram Business. Реальных Stars или NFT-транзакций нет.",
+                await self.say(uid,"🧪 <b>DEMO NFT Gift Offer</b>\n\n"
+                               "Отправьте в Business-чате сообщение: ссылка NFT, Stars, срок. "
+                               "Бот попробует заменить ваше сообщение карточкой.\n"
+                               "Для других чатов включите inline-режим в @BotFather (/setinline), "
+                               "выберите офер после @имя_бота.\n"
+                               "Кнопка «🧪 Тест офера» проверяет интерфейс без получателя.\n\n"
+                               "Реальных Stars или NFT-транзакций нет.",
                                kb.main_menu(user.role in {"owner","admin"}))
             else:
                 await self.say(uid,f"🔐 Доступ ограничен whitelist.\nВаш Telegram ID: <code>{uid}</code>\nПередайте ID администратору.")
@@ -172,12 +187,39 @@ class AppHandler:
         if not user.allowed:
             await self.say(uid,"🔐 Нет доступа к боту. Напишите /start для получения Telegram ID.")
             return
+        if text in {"🧪 Тест офера", "/test", "/testoffer"}:
+            await self.tg.send_media(uid,None,"photo",rnd.test_offer_caption(),
+                                     kb.test_offer_keyboard())
+            return
         if text.split(" ")[0].split("@")[0] == "/admin" or text == "⚙️ Админ-панель":
             if user.role not in {"admin","owner"}:
                 await self.say(uid,"Недостаточно прав администратора")
             else:
                 await self.show_admin(uid)
             return
+        if text in {"🔧 Диагностика", "/diag"}:
+            local=await self.db("diagnostics",uid) if user.role in {"admin","owner"} else None
+            if local is None:
+                return await self.say(uid,"Диагностика доступна только администратору")
+            try:
+                hook=await self.tg.api("getWebhookInfo")
+                actual=hook.get("url") or "(пусто)"
+                expected=self.cfg.webhook_endpoint
+                webhook_ok=actual==expected
+                last_error=(hook.get("last_error_message") or "нет")[:220]
+                remote_text=(f"Webhook: {'✅' if webhook_ok else '⚠️'} "
+                             f"{'совпадает' if webhook_ok else 'не совпадает с WEBHOOK_URL'}\n"
+                             f"Ожидаемый путь: <code>{rnd.h(expected)}</code>\n"
+                             f"Ожидающих Updates: {int(hook.get('pending_update_count') or 0)}\n"
+                             f"Последняя ошибка Telegram: {rnd.h(last_error)}")
+            except (TelegramError,AttributeError) as e:
+                remote_text="Webhook: не удалось прочитать Telegram API — " + rnd.h(e)
+            return await self.say(uid, "🔧 <b>Диагностика DEMO</b>\n\n"
+                f"Business-чаты: {local['known_chats']}\n"
+                f"С can_reply и входящим за 24 ч: {local['eligible_chats']}\n"
+                f"Business-подключения с видимыми чатами: {local['active_connections_in_known_chats']}\n"
+                f"С правом удаления: {local['with_delete_right']}\n\n"
+                + remote_text + "\n\nПроверка кнопок: /test. Для остальных чатов — inline через @имя_бота.")
         state,payload=await self.db("flow",uid)
         if state==ADMIN_INPUT:
             await self.admin_input(uid,text,payload)
@@ -202,14 +244,20 @@ class AppHandler:
                 statuses="\n".join(f"{rnd.STATUS_RU.get(k,k)}: {v}" for k,v in stats["statuses"].items())
                 await self.say(uid,f"📊 <b>Моя статистика</b>\nСоздано: {stats['total']}\nОтправлено: {stats['sent']}\n{statuses}")
         elif text in {"❓ Помощь","/help"}:
-            help_text=("🧪 <b>Помощь · DEMO</b>\n\n<b>Новый способ: прямо в Business-чате</b>\n"
+            help_text=("🧪 <b>Помощь · DEMO</b>\n\n<b>Способ 1: в Business-чате</b>\n"
                        "Отправьте собеседнику одно сообщение из трёх строк:\n"
                        "<code>https://t.me/nft/PlushPepe-123</code>\n<code>1000</code>\n<code>15м</code>\n\n"
                        "Бот отправит карточку в тот же чат. Если фото NFT не удалось получить автоматически, "
                        "пришлите фото NFT с этими строками в подписи.\n\n"
+                       "Способ 2: в любом чате включите inline у @BotFather командой /setinline. "
+                       "Наберите @имя_бота, пробел, ссылку, Stars и минуты; "
+                       "выберите результат (фото или текст).\n\n"
+                       "Проверка кнопок: «🧪 Тест офера» в меню бота.\n\n"
                        "Старый способ: «Создать офер» в меню бота.\n\n"
                        "У Business-бота должно быть can_reply, а у собеседника — входящее сообщение "
-                       "в последние 24 часа. Stars и NFT не переводятся.")
+                       "в последние 24 часа. Исходное сообщение заменяется, если Telegram разрешает "
+                       "редактирование; иначе создаётся новое. Удаление команды возможно только с правом "
+                       "can_delete_all_messages. Stars и NFT не переводятся.")
             contact_username, _ = await self.db("display_contact")
             if contact_username:
                 help_text += (f"\n\n👤 Контакт для вопросов по DEMO: "
@@ -295,34 +343,141 @@ class AppHandler:
             await self.db("save_flow",uid,WAIT_TARGET,payload)
             await self.show_target_choices(uid)
 
-    async def send_offer(self,offer, image_data: bytes | None = None, reply_to_message_id: int | None = None):
+    async def send_offer(self, offer, image_data: bytes | None = None,
+                         reply_to_message_id: int | None = None,
+                         prefer_edit_source: bool = False, source_kind: str = "text"):
+        """Edit the owner's outbound command when possible, otherwise send a card.
+
+        Only delete a command when a new card is already confirmed delivered and
+        Telegram grants can_delete_all_messages. Ambiguous network errors must
+        never trigger a duplicate send or premature deletion.
+        """
         try:
             await self.db("refresh_send_authorization",offer.id)
         except DomainError as exc:
             await self.db("mark_failed",offer.id,str(exc))
             raise
+        edited = False
         try:
             active_offer=SimpleNamespace(**{**vars(offer),"status":"active"})
-            opts = {}
-            if image_data is not None:
-                opts["image_data"] = image_data
-            if reply_to_message_id is not None:
-                opts["reply_to_message_id"] = reply_to_message_id
-            result=await self.tg.send_media(offer.recipient_chat_id,offer.gift_image_file_id,offer.media_kind,
-                                            rnd.offer_caption(active_offer),kb.offer_keyboard(active_offer),
-                                            business_id=offer.business_connection_id, **opts)
+            caption = rnd.offer_caption(active_offer)
+            markup = kb.offer_keyboard(active_offer)
+            edit_fn = getattr(self.tg, "edit_business_offer", None)
+            result = None
+            if (prefer_edit_source and reply_to_message_id is not None
+                    and edit_fn is not None):
+                try:
+                    result = await edit_fn(offer.recipient_chat_id, reply_to_message_id,
+                                           offer.business_connection_id, source_kind,
+                                           image_data, offer.gift_image_file_id, caption, markup)
+                    edited = True
+                except TelegramError as err:
+                    if err.status == 0:
+                        raise  # Telegram could have edited: do not risk duplicate
+                    log.warning("business_edit_denied offer_id=%s status=%s, fallback to send",
+                                offer.id,err.status)
+            if result is None:
+                opts = {}
+                if image_data is not None:
+                    opts["image_data"] = image_data
+                if reply_to_message_id is not None:
+                    opts["reply_to_message_id"] = reply_to_message_id
+                result=await self.tg.send_media(offer.recipient_chat_id,
+                                                offer.gift_image_file_id,offer.media_kind,
+                                                caption,markup,
+                                                business_id=offer.business_connection_id, **opts)
         except TelegramError as exc:
             if exc.status==0:
                 await self.db("mark_unknown",offer.id,str(exc))
             else:
                 await self.db("mark_failed",offer.id,str(exc))
             raise
-        # If DB commit fails after Telegram succeeded, startup reconciliation marks the delivery unknown.
         photo = result.get("photo") or []
-        image_file_id = photo[-1].get("file_id") if photo and isinstance(photo[-1],dict) else None
-        saved=await self.db("mark_sent",offer.id,int(result["message_id"]),image_file_id)
-        log.info("offer_sent",extra={"event":"OFFER_SENT","user_id":saved.creator_id,"offer_id":saved.id,"business_connection_id":saved.business_connection_id})
+        file_id = photo[-1].get("file_id") if photo and isinstance(photo[-1],dict) else None
+        saved=await self.db("mark_sent",offer.id,int(result["message_id"]),file_id)
+        if prefer_edit_source and not edited and reply_to_message_id is not None:
+            try:
+                if (getattr(self.tg,"delete_business_source",None)
+                        and await self.db("can_delete_business_source",offer.creator_id,offer.business_connection_id)):
+                    await self.tg.delete_business_source(offer.business_connection_id,reply_to_message_id)
+            except TelegramError as exc:
+                log.warning("source_cleanup_failed offer_id=%s status=%s",offer.id,exc.status)
+        log.info("offer_sent",extra={"event":"OFFER_SENT","user_id":saved.creator_id,
+                                     "offer_id":saved.id,"business_connection_id":saved.business_connection_id})
         return saved
+
+    async def on_inline_query(self, query: dict):
+        """Sendable in any chat without pretending Business bots have unlimited reach.
+
+        A user selects a bot-generated inline result in their own conversation;
+        Telegram publishes it as their chosen inline message.
+        """
+        query_id = query.get("id")
+        sender = (query.get("from") or {}).get("id")
+        if not query_id or not isinstance(sender,int):
+            return
+        command = parse_quick_offer(query.get("query") or "")
+        if not command or not await self.db("can_create",sender):
+            return await self.tg.answer_inline(query_id,[])
+        offer=await self.db("create_inline_offer",sender,vars(command))
+        mock = SimpleNamespace(gift_name=offer.gift_name, gift_url=offer.gift_url,
+                               stars_amount=offer.stars_amount, expires_at=offer.expires_at,
+                               status="active")
+        caption = rnd.offer_caption(mock)
+        title = f"DEMO {offer.gift_name} · {offer.stars_amount:,} Stars".replace(","," ")[:120]
+        url = image_url(offer.gift_url)
+        result_text={"type":"article", "id":f"o{offer.id}t", "title":"🧪 " + title,
+                     "description":"Текстовая карточка · всегда доступна", "input_message_content":{
+                         "message_text":caption,"parse_mode":"HTML",
+                         "link_preview_options":{"is_disabled":True}},
+                     "reply_markup":kb.inline_offer_keyboard(offer.id,offer.gift_url,"active","t")}
+        result_photo={"type":"photo", "id":f"o{offer.id}p", "title":"🖼 " + title,
+                      "description":"Фото из публичного источника, если доступно",
+                      "photo_url":url,"thumbnail_url":url,
+                      "caption":caption,"parse_mode":"HTML",
+                      "reply_markup":kb.inline_offer_keyboard(offer.id,offer.gift_url,"active","p")}
+        try:
+            await self.tg.answer_inline(query_id,[result_text,result_photo])
+        except TelegramError as exc:
+            if exc.status == 0:
+                raise  # unknown network result, no duplicate call
+            log.warning("inline_photo_not_supported status=%s",exc.status)
+            await self.tg.answer_inline(query_id,[result_text])
+
+    async def inline_callback(self, uid: int, cid: str, data: str, c: dict):
+        parts=data.split(":")
+        if len(parts)!=4 or parts[3] not in {"p","t"}:
+            raise DomainError("Неправильная inline-кнопка")
+        _,action,offer_id,media=parts
+        inline_id=c.get("inline_message_id")
+        if not inline_id:
+            raise DomainError("Нужен оригинал inline-сообщения")
+        offer,status=await self.db("inline_action",int(offer_id),inline_id,action)
+        if action=="instructions":
+            return await self.tg.answer_callback(cid,
+                "DEMO: никаких реальных передач NFT или начислений Stars нет.",True)
+        mock=SimpleNamespace(gift_name=offer.gift_name,gift_url=offer.gift_url,
+                             stars_amount=offer.stars_amount,expires_at=offer.expires_at,
+                             status=status)
+        await self.tg.edit_inline_offer(inline_id,rnd.offer_caption(mock),
+                                        kb.inline_offer_keyboard(offer.id,offer.gift_url,status,media),
+                                        photo=media=="p")
+        return await self.tg.answer_callback(cid,"Действие DEMO сохранено")
+
+    async def test_callback(self, uid: int, cid: str, data: str, c: dict):
+        msg=c.get("message") or {}
+        if (msg.get("chat") or {}).get("type")!="private" or (msg.get("chat") or {}).get("id")!=uid:
+            raise DomainError("Тест доступен только в личном чате")
+        action=data.split(":",1)[1]
+        if action=="instructions":
+            return await self.tg.answer_callback(cid,
+                "DEMO: подарок не передаётся, Stars не списываются и не начисляются.",True)
+        if action not in {"accept","decline","transfer"}:
+            raise DomainError("Неизвестное тестовое действие")
+        status={"accept":"accepted","decline":"declined","transfer":"transfer_requested"}[action]
+        caption=rnd.test_offer_caption(status)
+        await self.tg.edit_test_caption(uid,msg["message_id"],caption,kb.test_offer_keyboard(status))
+        await self.tg.answer_callback(cid,"Тестовый статус изменён")
 
     async def on_callback(self,c:dict):
         uid=(c.get("from") or {}).get("id")
@@ -337,6 +492,10 @@ class AppHandler:
         if not registered:
             return await self.tg.answer_callback(cid,"Уже обработано")
         try:
+            if data.startswith("test:"):
+                return await self.test_callback(uid,cid,data,c)
+            if data.startswith("inline:"):
+                return await self.inline_callback(uid,cid,data,c)
             if data.startswith("offer:"):
                 return await self.offer_callback(uid,cid,data,c)
             if data.startswith("admin:"):

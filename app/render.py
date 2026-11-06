@@ -79,3 +79,15 @@ def stats_text(d: dict):
             ("instructions","Открытий инструкции"),("today","Событий сегодня (UTC)"),
             ("week","За 7 дней"),("all_time","Событий всего")]
     return "📊 <b>Статистика (DEMO)</b>\n\n"+"\n".join(f"{v}: <b>{d.get(k,0)}</b>" for k,v in labels)
+
+
+def test_offer_caption(status: str = "active") -> str:
+    """Exact button/layout smoke test, intentionally not a real NFT or payment."""
+    return ("🧪 <b>ТЕСТ · NFT Gift Offer (DEMO)</b>\n\n"
+            "🎁 <b>Example NFT (тестовый образец)</b>\n"
+            "🔗 https://t.me/nft/Example-1\n"
+            "⭐ Предложение: <b>1 000 Stars (DEMO)</b>\n"
+            "⏳ Срок: <b>30 минут (тест)</b>\n"
+            f"📍 Статус: <b>{h(STATUS_RU.get(status,status))}</b>\n\n"
+            "⚠️ Это только проверка интерфейса. Изображение — заглушка; "
+            "Stars и NFT не передаются.")

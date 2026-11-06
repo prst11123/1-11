@@ -15,9 +15,10 @@ def main_menu(admin=False):
     keyboard=[
         [{"text":"🎁 Создать офер"}, {"text":"📋 Мои оферы"}],
         [{"text":"💼 Business подключения"}, {"text":"📊 Статистика"}],
-        [{"text":"❓ Помощь"}],
+        [{"text":"🧪 Тест офера"}, {"text":"❓ Помощь"}],
     ]
-    if admin:keyboard.append([{"text":"⚙️ Админ-панель"}])
+    if admin:
+        keyboard.append([{"text":"🔧 Диагностика"}, {"text":"⚙️ Админ-панель"}])
     return {"keyboard":keyboard, "resize_keyboard":True, "is_persistent":True}
 
 
@@ -95,3 +96,26 @@ def page_keyboard(prefix: str, page: int, total: int, extra=None):
     if extra:buttons.extend(extra)
     buttons.append([btn("↩️ Админ-панель","admin:panel")])
     return {"inline_keyboard":buttons}
+
+
+def test_offer_keyboard(status: str = "active"):
+    rows=[[btn("🔎 Пример NFT", url="https://t.me/nft/Example-1")]]
+    if status == "active":
+        rows.append([btn("Отклонить", "test:decline"), btn("Принять", "test:accept")])
+    elif status == "accepted":
+        rows.append([btn("Передать (DEMO)", "test:transfer")])
+        rows.append([btn("Как передать?", "test:instructions")])
+    return inline(*rows)
+
+
+def inline_offer_keyboard(offer_id: int, gift_url: str, status: str, media: str):
+    # Inline messages carry no business_connection_id; callbacks resolve a
+    # database template and a per-inline-message state.
+    rows=[[btn("🔎 Показать подарок", url=gift_url)]]
+    if status == "active":
+        rows.append([btn("Отклонить", f"inline:decline:{offer_id}:{media}"),
+                     btn("Принять", f"inline:accept:{offer_id}:{media}")])
+    elif status == "accepted":
+        rows.append([btn("Передать (DEMO)", f"inline:transfer:{offer_id}:{media}")])
+        rows.append([btn("Как передать?", f"inline:instructions:{offer_id}:{media}")])
+    return inline(*rows)
