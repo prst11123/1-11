@@ -1,0 +1,32 @@
+ОБНОВЛЕНИЕ: ОФЕР ПО СООБЩЕНИЮ В BUSINESS-ЧАТЕ
+
+1) Убедитесь, что Railway-сервис уже работает и Postgres сохранён.
+2) Обновите через GitHub Desktop или Git только перечисленные ниже файлы,
+   сохранив вложенные папки:
+   app/handlers.py
+   app/store.py
+   app/models.py
+   app/telegram.py
+   app/states.py
+   app/quick_offer.py        (новый)
+   app/gift_images.py       (новый)
+   alembic/versions/0002_business_chat_commands.py  (новый)
+   README.md
+   DESIGN.md
+3) Отправьте изменения в GitHub. Railway пересоберётся, выполнит Alembic
+   миграцию, а затем запустит бота. Не удаляйте БД.
+4) Получатель должен сначала написать вашему подключённому Business-аккаунту.
+5) В ЭТОМ ЖЕ ЧАТЕ владелец Business отправляет сообщение:
+
+https://t.me/nft/PlushPepe-123
+1000
+15м
+
+Бот (если Telegram доставляет outgoing business_message, а can_reply разрешено)
+попробует загрузить изображение этого NFT и отправит DEMO Offer с кнопками.
+Если изображение недоступно, приложите фото NFT и эти же три строки
+в подписи к фотографии. Введите '/offer https://t.me/nft/PlushPepe-123 1000 15'
+как альтернативу.
+
+ВНИМАНИЕ: это НЕ нативный Telegram Gift Offer; Stars и NFT не переводятся.
+Ни BOT_TOKEN, ни DATABASE_URL, ни WEBHOOK_SECRET менять не требуется.
