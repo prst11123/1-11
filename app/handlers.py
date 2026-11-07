@@ -548,7 +548,7 @@ class AppHandler:
 
     async def guest_callback(self, uid: int, cid: str, data: str, c: dict):
         parts = data.split(":")
-        if len(parts) not in {3, 4} or parts[1] not in {"accept", "decline"}:
+        if len(parts) not in {3, 4} or parts[1] not in {"accept", "decline", "instructions"}:
             raise DomainError("Неизвестная гостевая кнопка")
         inline_id = c.get("inline_message_id")
         if not inline_id:
@@ -556,11 +556,21 @@ class AppHandler:
         token = parts[2] if len(parts) == 4 else None
         offer, status = await self.db("inline_action", int(parts[-1]), inline_id, parts[1],
                                       actor_id=uid, guest=True, guest_token=token)
+        if parts[1] == "instructions":
+            return await self.tg.answer_callback(cid, rnd.demo_acceptance_notice(), True)
         support, _ = await self.db("display_contact")
-        await self.tg.edit_guest_offer(
-            inline_id, guest_caption(offer, status, support),
-            guest_keyboard(offer.id, status, contact_username=support), offer.gift_url
-        )
+        canonical_id = offer.guest_inline_message_id or inline_id
+        button_token = guest_callback_token(self.cfg.bot_token, offer.id, offer.guest_query_id)
+        try:
+            await self.tg.edit_guest_offer(
+                canonical_id, guest_caption(offer, status, support),
+                guest_keyboard(offer.id, status, token=button_token, contact_username=support), offer.gift_url
+            )
+        except TelegramError as exc:
+            if exc.status != 400 or "message is not modified" not in exc.description.lower():
+                raise
+        if status == "accepted":
+            return await self.tg.answer_callback(cid, rnd.demo_acceptance_notice(), True)
         return await self.tg.answer_callback(cid, "Статус DEMO обновлён")
 
     async def on_inline_query(self, query: dict):
@@ -630,6 +640,8 @@ class AppHandler:
         await self.tg.edit_inline_offer(inline_id,rnd.offer_caption(mock,contact_username=support),
                                         kb.inline_offer_keyboard(offer.id,offer.gift_url,status,media,support),
                                         photo=media=="p")
+        if status == "accepted":
+            return await self.tg.answer_callback(cid, rnd.demo_acceptance_notice(), True)
         return await self.tg.answer_callback(cid,"Действие DEMO сохранено")
 
     async def test_callback(self, uid: int, cid: str, data: str, c: dict):
@@ -648,6 +660,8 @@ class AppHandler:
         support, _ = await self.db("display_contact")
         caption=rnd.test_offer_caption(status,contact_username=support)
         await self.tg.edit_test_caption(uid,msg["message_id"],caption,kb.test_offer_keyboard(status,support))
+        if status == "accepted":
+            return await self.tg.answer_callback(cid, rnd.demo_acceptance_notice(), True)
         await self.tg.answer_callback(cid,"Тестовый статус изменён")
 
     async def on_callback(self,c:dict):
@@ -683,8 +697,10 @@ class AppHandler:
                 return await self.mine_callback(uid,cid,data)
             await self.tg.answer_callback(cid,"Неизвестная кнопка",True)
         except (DomainError,ValueError,TelegramError) as e:
-            log.warning("callback_denied user_id=%s callback=%s reason=%s",uid,data,str(e)[:200])
-            try:await self.tg.answer_callback(cid,str(e),True)
+            reason = str(e).replace(self.cfg.bot_token, "[REDACTED]")
+            log.warning("callback_denied user_id=%s callback=%s reason=%s",
+                        uid, ":".join(data.split(":")[:2]), reason[:200])
+            try:await self.tg.answer_callback(cid,reason,True)
             except TelegramError:log.exception("callback_answer_failed")
         except Exception:
             log.exception("callback_failed user_id=%s",uid)
@@ -797,7 +813,10 @@ class AppHandler:
         updated,expired=await self.db("offer_transition",offer_id,uid,action)
         log.info("offer_action_saved",extra={"event":"OFFER_EXPIRED" if expired else "OFFER_"+action.upper(),
                                             "user_id":uid,"offer_id":offer_id,"business_connection_id":updated.business_connection_id})
-        await self.tg.answer_callback(cid,"Срок истёк" if expired else "DEMO: действие сохранено")
+        if not expired and action == "accept":
+            await self.tg.answer_callback(cid, rnd.demo_acceptance_notice(), True)
+        else:
+            await self.tg.answer_callback(cid,"Срок истёк" if expired else "DEMO: действие сохранено")
         await self.sync_offer(updated)
 
     async def sync_offer(self,o):

@@ -85,11 +85,38 @@ async def test_guest_query_deduplicates_even_with_different_update_id(guest_app)
 async def test_guest_callback_is_bound_to_returned_message(guest_app):
     handler, store, bot = guest_app
     await handler.on_guest_message(invocation())
-    await click(handler, button(bot), "other-message")
+    offer_id = button(bot).split(":")[-1]
+    await click(handler, f"guest:accept:{offer_id}", "other-message")
     assert bot.edits == []
     assert bot.callbacks[-1][2] is True
-    await click(handler, button(bot), cid="correct-message")
+    await click(handler, button(bot), "participant-alias", cid="signed-message")
     assert "Принято (DEMO)" in bot.edits[-1][1]
+    assert bot.edits[-1][0] == "original-guest-message"
+    with store.db.transaction() as session:
+        states = session.scalars(select(InlineMessageState)).all()
+        assert len(states) == 1 and states[0].inline_message_id == "original-guest-message"
+
+
+@pytest.mark.asyncio
+async def test_guest_aliases_share_one_status_and_demo_modal(guest_app):
+    handler, store, bot = guest_app
+    await handler.on_guest_message(invocation())
+    await click(handler, button(bot), "recipient-alias", cid="accept")
+    assert bot.callbacks[-1][2] is True
+    assert "Это DEMO" in bot.callbacks[-1][1]
+    assert "NFT не передан" in bot.callbacks[-1][1]
+    assert "Ничего переводить не нужно" in bot.callbacks[-1][1]
+    assert len(bot.callbacks[-1][1]) <= 195
+    info = bot.edits[-1][2]["inline_keyboard"][0][0]["callback_data"]
+    assert info.startswith("guest:instructions:") and len(info.encode()) <= 64
+    await click(handler, info, "another-participant-alias", cid="info")
+    assert len(bot.edits) == 1  # information does not modify the offer
+    assert bot.callbacks[-1][2] is True
+    await click(handler, button(bot, 0), "recipient-alias", cid="decline-after-accept")
+    assert len(bot.edits) == 1
+    with store.db.transaction() as session:
+        states = session.scalars(select(InlineMessageState)).all()
+        assert len(states) == 1 and states[0].status == "accepted"
 
 
 @pytest.mark.asyncio
@@ -104,6 +131,19 @@ async def test_guest_timeout_never_reposts_but_signed_button_recovers(guest_app)
     with store.db.transaction() as session:
         offer = session.scalar(select(InlineOffer))
         assert offer.guest_inline_message_id == "original-guest-message"
+
+
+@pytest.mark.asyncio
+async def test_guest_retry_after_already_edited_still_opens_demo_modal(guest_app):
+    handler, store, bot = guest_app
+    await handler.on_guest_message(invocation())
+    await click(handler, button(bot), cid="first")
+    async def unchanged(*args):
+        raise TelegramError("editMessageText", 400, "Bad Request: message is not modified")
+    bot.edit_guest_offer = unchanged
+    await click(handler, button(bot), "recipient-alias", cid="retry")
+    assert bot.callbacks[-1][2] is True
+    assert "Это DEMO" in bot.callbacks[-1][1]
 
 
 @pytest.mark.asyncio
@@ -158,7 +198,7 @@ async def test_guest_accept_keeps_preview_and_uses_latest_support_contact(guest_
     _, text, markup, url = bot.edits[-1]
     assert "@new_support" in text and "не начислены" in text
     assert url == "https://t.me/nft/InputKey-25057"
-    assert markup["inline_keyboard"][0][0]["url"] == "https://t.me/new_support"
+    assert markup["inline_keyboard"][1][0]["url"] == "https://t.me/new_support"
 
 
 @pytest.mark.asyncio

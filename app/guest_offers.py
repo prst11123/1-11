@@ -38,13 +38,13 @@ def guest_callback_token(secret: str, offer_id: int, query_id: str) -> str:
 
 def guest_caption(offer, status: str = "active", contact_username: str | None = None) -> str:
     """Clearly labelled demonstration, never a completed sale or payout."""
-    heading = (f"🧪 <b>DEMO · NFT Gift Offer</b>\n\n"
-               f"🎁 <b>{escape(offer.gift_name)}</b>\n"
+    heading = (f"🧪 <b>DEMO-офер</b>\n\n"
+               f'🎁 <a href="{escape(offer.gift_url, quote=True)}"><b>{escape(offer.gift_name)}</b></a>\n'
                f"⭐ Предложение: <b>{int(offer.stars_amount):,} Stars (DEMO)</b>\n".replace(',', ' ')
-               + f"🔗 {escape(offer.gift_url)}\n")
+               )
     if status == 'active':
         return heading + (f"⏳ Срок до: <b>{aware(offer.expires_at).strftime('%d.%m.%Y %H:%M UTC')}</b>\n\n"
-                          "⚠️ Тестовая карточка. Настоящей оплаты и передачи NFT нет.")
+                          "Тестовый офер. NFT и Stars не переводятся.")
     if status == 'accepted':
         contact = f"\n🆘 Поддержка: @{escape(contact_username)}" if contact_username else ""
         return heading + "\n✅ <b>Принято (DEMO)</b>\nNFT не продан, Stars не начислены. Ничего не переводите." + contact
@@ -57,8 +57,12 @@ def guest_caption(offer, status: str = "active", contact_username: str | None = 
 
 def guest_keyboard(offer_id: int, status: str = "active", token: str | None = None,
                    contact_username: str | None = None) -> dict:
-    if status == "accepted" and contact_username:
-        return {"inline_keyboard": [[{"text": "🆘 Поддержка", "url": f"https://t.me/{contact_username}"}]]}
+    if status == "accepted":
+        suffix = f"{token}:{offer_id}" if token else str(offer_id)
+        rows = [[{"text": "ℹ️ Что означает DEMO?", "callback_data": f"guest:instructions:{suffix}"}]]
+        if contact_username:
+            rows.append([{"text": "🆘 Поддержка", "url": f"https://t.me/{contact_username}"}])
+        return {"inline_keyboard": rows}
     if status != "active":
         return {"inline_keyboard": []}
     suffix = f"{token}:{offer_id}" if token else str(offer_id)

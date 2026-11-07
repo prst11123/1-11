@@ -86,6 +86,13 @@ def stats_text(d: dict):
     return "📊 <b>Статистика (DEMO)</b>\n\n"+"\n".join(f"{v}: <b>{d.get(k,0)}</b>" for k,v in labels)
 
 
+def demo_acceptance_notice() -> str:
+    """Fits Telegram's 200-character callback alert; no transfer instructions."""
+    return ("✅ Принято для тестирования. Это DEMO.\n\n"
+            "NFT не передан. Stars не списаны и не начислены.\n"
+            "Ничего переводить не нужно.")
+
+
 def test_offer_caption(status: str = "active", contact_username: str | None = None) -> str:
     """Exact button/layout smoke test, intentionally not a real NFT or payment."""
     body = ("🧪 <b>ТЕСТ · NFT Gift Offer (DEMO)</b>\n\n"

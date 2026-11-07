@@ -759,8 +759,13 @@ class Store:
                     # A signed callback is proof that Telegram delivered the
                     # reply despite a lost answerGuestQuery HTTP response.
                     offer.guest_inline_message_id = message_id
-                elif offer.guest_inline_message_id != message_id:
+                elif offer.guest_inline_message_id != message_id and guest_token is None:
                     raise DomainError("Несовпадение гостевого сообщения")
+                # The signed button identifies this query's one canonical
+                # reply. Never use a callback-supplied alias as an edit target
+                # or create a second state for it. Unsigned legacy callbacks
+                # still require the exact confirmed message identifier.
+                message_id = offer.guest_inline_message_id
             row = s.execute(select(InlineMessageState).where(
                 InlineMessageState.inline_message_id == message_id).with_for_update()).scalar_one_or_none()
             if row is not None and row.inline_offer_id != offer_id:
