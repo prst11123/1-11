@@ -31,7 +31,7 @@ def parse_quick_offer(text: str) -> QuickOffer | None:
       /offer https://t.me/nft/PlushPepe-123 1000 15
     """
     tokens = text.strip().split()
-    if tokens and tokens[0].lower() in {"/offer", "офер", "/офер", "-офер", "-offer"}:
+    if tokens and tokens[0].lower() in {"/offer", "офер", "/офер", "-офер", "-offer", "/linkoffer"}:
         tokens = tokens[1:]
     if len(tokens) != 3:
         return None

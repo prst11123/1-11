@@ -101,6 +101,8 @@ class AppHandler:
         if msg.get("sender_business_bot") or (msg.get("from") or {}).get("is_bot"):
             return
         raw = (msg.get("text") or msg.get("caption") or "").strip()
+        link_offer = (bool(msg.get("text")) and bool(raw)
+                      and raw.split(maxsplit=1)[0].casefold() == "/linkoffer")
         demo_trigger = raw.casefold() in {"#тестофер", "/testoffer", "тестофер"}
         if demo_trigger:
             from .quick_offer import QuickOffer
@@ -135,9 +137,9 @@ class AppHandler:
         attachment = (msg.get("document") or {})
         supplied = photos[-1].get("file_id") if photos else (
             attachment.get("file_id") if str(attachment.get("mime_type", "")).startswith("image/") else None)
-        media_kind = "document" if not photos and supplied else "photo"
+        media_kind = "text" if link_offer else ("document" if not photos and supplied else "photo")
         image_data = None
-        if not supplied:
+        if not supplied and not link_offer:
             if demo_trigger:
                 # Convert the local fixture to JPEG for Telegram upload and editing.
                 # A test trigger must not depend on Fragment being online.
@@ -170,7 +172,7 @@ class AppHandler:
             return
         try:
             await self.send_offer(o, image_data=image_data, reply_to_message_id=source_id,
-                                  prefer_edit_source=bool(supplied) or self.cfg.business_edit_text,
+                                  prefer_edit_source=link_offer or bool(supplied) or self.cfg.business_edit_text,
                                   source_kind=(media_kind if supplied else "text"))
         except (DomainError, TelegramError) as e:
             reason = str(e).replace(self.cfg.bot_token, "[REDACTED]")
@@ -450,7 +452,17 @@ class AppHandler:
             markup = kb.offer_keyboard(active_offer)
             edit_fn = getattr(self.tg, "edit_business_offer", None)
             result = None
-            if (prefer_edit_source and reply_to_message_id is not None
+            if offer.media_kind == "text":
+                original_id = getattr(offer, "source_message_id", None)
+                if not original_id:
+                    raise DomainError("Ссылочная карточка требует исходного Business-сообщения")
+                # Explicit opt-in: edit only this owner's exact command. Never
+                # send a replacement/photo or delete anything on rejection.
+                result = await self.tg.edit_business_link_offer(
+                    offer.recipient_chat_id, original_id, offer.business_connection_id,
+                    caption, markup, offer.gift_url)
+                edited = True
+            elif (prefer_edit_source and reply_to_message_id is not None
                     and edit_fn is not None):
                 try:
                     result = await edit_fn(offer.recipient_chat_id, reply_to_message_id,
@@ -474,8 +486,8 @@ class AppHandler:
                                                 offer.gift_image_file_id,offer.media_kind,
                                                 caption,markup,
                                                 business_id=offer.business_connection_id, **opts)
-        except TelegramError as exc:
-            if exc.status==0:
+        except (TelegramError, DomainError) as exc:
+            if isinstance(exc, TelegramError) and exc.status==0:
                 await self.db("mark_unknown",offer.id,str(exc))
             else:
                 await self.db("mark_failed",offer.id,str(exc))

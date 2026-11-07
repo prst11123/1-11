@@ -1,9 +1,31 @@
 """Validate direct official Bot API field shapes against a local fake HTTP endpoint."""
 import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 import pytest
 from app.telegram import Telegram, TelegramError
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("synchronize", [False, True])
+async def test_business_link_card_uses_text_edit_and_native_preview(synchronize):
+    tg = Telegram("unused")
+    tg.api = AsyncMock(return_value={"message_id": 11})
+    url = "https://t.me/nft/ScaredCat-10668"
+    if synchronize:
+        offer = SimpleNamespace(media_kind="text", recipient_chat_id=2002, telegram_message_id=11,
+                                business_connection_id="biz-link", gift_url=url)
+        await tg.edit_caption(offer, "DEMO", {"inline_keyboard": []})
+    else:
+        await tg.edit_business_link_offer(2002, 11, "biz-link", "DEMO", {"inline_keyboard": []}, url)
+    method, = tg.api.call_args.args
+    fields = tg.api.call_args.kwargs
+    assert method == "editMessageText"
+    assert (fields["chat_id"], fields["message_id"], fields["business_connection_id"]) == (2002, 11, "biz-link")
+    assert fields["link_preview_options"] == {"url": url, "prefer_large_media": True}
+    assert "__upload" not in fields and "photo" not in fields
 
 
 @pytest.mark.asyncio
