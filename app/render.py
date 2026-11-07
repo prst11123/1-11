@@ -32,7 +32,7 @@ def active_offer_caption(o) -> str:
     """Compact offer paragraph above the native NFT preview."""
     stars = f"{int(o.stars_amount):,}".replace(",", " ")
     caption = ("🧪 <b>DEMO</b>\n\n"
-               f"Пользователь предлагает вам <b>{stars} Stars</b> за подарок "
+               f"Пользователь предлагает вам <b>{stars} ⭐</b> за подарок "
                f'<a href="{h(o.gift_url)}">{h(o.gift_name)}</a>.\n\n'
                f"⏳ Действует до: <b>{expiry_string(o.expires_at)}</b>\n"
                "Тест: NFT и Stars не переводятся.")
@@ -45,7 +45,7 @@ def offer_caption(o, preview=False, contact_username: str | None = None) -> str:
     if o.status == "active":
         return active_offer_caption(o)
     parts=["🧪 <b>DEMO · NFT Gift Offer</b>", "", f"🎁 <b>{h(o.gift_name)}</b>",
-           f"🔗 {h(o.gift_url)}", f"⭐ Предложение: <b>{o.stars_amount:,} Stars</b>".replace(",", " "),
+           f"🔗 {h(o.gift_url)}", f"Предложение: <b>{o.stars_amount:,} ⭐</b>".replace(",", " "),
            f"⏳ Действует до: <b>{expiry_string(o.expires_at)}</b>",
            f"📍 Статус: <b>{h(STATUS_RU.get(o.status, o.status))}</b>"]
     if o.status == "accepted":
@@ -113,7 +113,7 @@ def test_offer_caption(status: str = "active", contact_username: str | None = No
     body = ("🧪 <b>ТЕСТ · NFT Gift Offer (DEMO)</b>\n\n"
             "🎁 <b>Example NFT (тестовый образец)</b>\n"
             "🔗 https://t.me/nft/Example-1\n"
-            "⭐ Предложение: <b>1 000 Stars (DEMO)</b>\n"
+            "Предложение: <b>1 000 ⭐ (DEMO)</b>\n"
             "⏳ Срок: <b>30 минут (тест)</b>\n"
             f"📍 Статус: <b>{h(STATUS_RU.get(status,status))}</b>\n\n")
     if status == "accepted":

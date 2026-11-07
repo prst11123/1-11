@@ -43,7 +43,7 @@ def guest_caption(offer, status: str = "active", contact_username: str | None = 
         return active_offer_caption(offer)
     heading = (f"🧪 <b>DEMO-офер</b>\n\n"
                f'🎁 <a href="{escape(offer.gift_url, quote=True)}"><b>{escape(offer.gift_name)}</b></a>\n'
-               f"⭐ Предложение: <b>{int(offer.stars_amount):,} Stars (DEMO)</b>\n".replace(',', ' ')
+               f"Предложение: <b>{int(offer.stars_amount):,} ⭐ (DEMO)</b>\n".replace(',', ' ')
                )
     if status == 'accepted':
         contact = f"\n🆘 Поддержка: @{escape(contact_username)}" if contact_username else ""

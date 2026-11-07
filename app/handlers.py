@@ -601,7 +601,7 @@ class AppHandler:
                                stars_amount=offer.stars_amount, expires_at=offer.expires_at,
                                status="active")
         caption = rnd.offer_caption(mock)
-        title = f"DEMO {offer.gift_name} · {offer.stars_amount:,} Stars".replace(","," ")[:120]
+        title = f"DEMO {offer.gift_name} · {offer.stars_amount:,} ⭐".replace(","," ")[:120]
         url = image_url(offer.gift_url)
         result_text={"type":"article", "id":f"o{offer.id}t", "title":"🧪 " + title,
                      "description":"Карточка с предпросмотром ссылки на этот NFT", "input_message_content":{

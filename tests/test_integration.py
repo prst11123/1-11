@@ -83,7 +83,7 @@ async def test_end_to_end_business_offer_demo(config,tmp_path):
     sent=[x for x in fake.calls if x[0]=="send_media" and x[1]==2002]
     assert len(sent)==1, "must actually send one media message to recipient business chat"
     assert sent[0][2]=="b_test"
-    assert "DEMO" in sent[0][3] and "1 000 Stars" in sent[0][3]
+    assert "DEMO" in sent[0][3] and "1 000 ⭐" in sent[0][3]
     o=store.offers_by_creator(1001)[1][0]
     assert o.delivery_status=="sent" and o.status=="active" and o.telegram_message_id
     await cb(recipient,f"offer:accept:{o.id}",2002,o.telegram_message_id)
