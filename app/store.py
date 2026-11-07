@@ -104,13 +104,13 @@ class Store:
         return self.config.demo_contact_username, "Railway" if self.config.demo_contact_username else "Не указан"
 
     def set_display_contact(self, actor: int, username: str | None):
-        """Owner-only, validated and audited. None resets to the Railway default."""
+        """Admin-only, validated and audited. None resets to the Railway default."""
         if username is not None:
             username = username.strip().lstrip("@").lower()
             if not re.fullmatch(r"[a-z0-9_]{5,32}", username):
                 raise DomainError("Username: 5–32 латинских букв, цифр или _")
         with self.db.transaction() as s:
-            self._require_admin(s, actor, owner_only=True)
+            self._require_admin(s, actor)
             setting = s.get(AppSetting, "demo_contact_username")
             old = setting.value if setting else None
             if username is None:
@@ -129,6 +129,49 @@ class Store:
             self._event(s, "DEMO_CONTACT_UPDATED", actor_id=actor,
                         metadata={"previous": old, "current": username})
         return self.display_contact()
+
+    DEFAULT_FAQ = (
+        "❔ Частые вопросы\n\n"
+        "1. Почему не появляется карточка?\n"
+        "Проверьте /test в личном чате бота. Для отправки в другой чат "
+        "включите Guest Mode через Mini App @BotFather и отправьте "
+        "@имя_бота с NFT-ссылкой, Stars и минутами в нужный чат.\n\n"
+        "2. Почему бот не заменяет обычное сообщение?\n"
+        "Обычные сообщения пользователя в чужих чатах бот не редактирует. "
+        "В Telegram Business доступны лишь чаты и действия, разрешённые Telegram.\n\n"
+        "3. Что означают Stars и кнопки?\n"
+        "Это DEMO: оплата и передача NFT отсутствуют. Не отправляйте подарки или деньги для тестирования.\n\n"
+        "4. Ошибка при отправке?\n"
+        "Откройте /diag или передайте поддержке текст ошибки без токенов и паролей."
+    )
+
+    def display_faq(self) -> str:
+        with self.db.transaction() as s:
+            entry = s.get(AppSetting, "faq_text")
+            return entry.value if entry else self.DEFAULT_FAQ
+
+    def set_faq_text(self, actor: int, faq: str | None) -> str:
+        """Admins can update the FAQ as plain text. None restores the default."""
+        if faq is not None:
+            faq = faq.strip()
+            if not 30 <= len(faq) <= 3000:
+                raise DomainError("FAQ: от 30 до 3000 символов")
+        with self.db.transaction() as s:
+            self._require_admin(s, actor)
+            entry = s.get(AppSetting, "faq_text")
+            if faq is None:
+                if entry:
+                    s.delete(entry)
+            else:
+                if entry is None:
+                    s.add(AppSetting(key="faq_text", value=faq, updated_by=actor, updated_at=utcnow()))
+                else:
+                    entry.value, entry.updated_by, entry.updated_at = faq, actor, utcnow()
+            s.add(AdminAudit(actor_id=actor, target_id=None, action="FAQ_UPDATED",
+                             event_metadata={"mode": "reset" if faq is None else "updated"},
+                             created_at=utcnow()))
+            self._event(s, "FAQ_UPDATED", actor_id=actor)
+        return self.display_faq()
 
     def get_users(self, page=0, limit=8):
         with self.db.transaction() as s:
@@ -441,6 +484,7 @@ class Store:
             o = s.get(Offer, offer_id)
             if not o or o.status != "draft" or o.delivery_status != "sending":
                 raise DomainError("Offer больше недоступен для отправки")
+            self._require_or_creator(s, o.creator_id, o.creator_id)
             ch = s.scalar(select(BusinessChat).where(BusinessChat.business_connection_id == o.business_connection_id,
                                                     BusinessChat.chat_id == o.recipient_chat_id))
             bc = s.scalar(select(BusinessConnection).where(BusinessConnection.business_connection_id == o.business_connection_id))
@@ -481,6 +525,7 @@ class Store:
             o = s.execute(select(Offer).where(Offer.id == offer_id).with_for_update()).scalar_one_or_none()
             if not o or o.creator_id != creator or o.status != "draft" or o.delivery_status != "failed":
                 raise DomainError("Повторная отправка невозможна")
+            self._require_or_creator(s, creator, o.creator_id)
             ch = s.scalar(select(BusinessChat).where(BusinessChat.business_connection_id == o.business_connection_id, BusinessChat.chat_id == o.recipient_chat_id))
             bc = s.scalar(select(BusinessConnection).where(BusinessConnection.business_connection_id == o.business_connection_id))
             if not ch or not bc or not self._can_send(ch,bc):
@@ -644,14 +689,20 @@ class Store:
             s.execute(delete(ProcessedUpdate).where(ProcessedUpdate.created_at < threshold))
             s.execute(delete(CallbackReceipt).where(CallbackReceipt.created_at < threshold))
 
-    def create_inline_offer(self, creator: int, offer_data: dict):
+    def create_inline_offer(self, creator: int, offer_data: dict, guest_query_id: str | None = None):
         """Create a shareable DEMO template for a valid, authorized inline query."""
         with self.db.transaction() as s:
             actor = s.get(User, creator)
             if not actor or not actor.allowed or actor.blocked:
                 raise DomainError("Нет доступа к созданию inline-оферов")
+            if guest_query_id is not None:
+                if not guest_query_id or len(guest_query_id) > 512:
+                    raise DomainError("Некорректный гостевой запрос")
+                if s.scalar(select(InlineOffer.id).where(InlineOffer.guest_query_id == guest_query_id)):
+                    return None  # already claimed, including an ambiguous network result
             obj = InlineOffer(
                 creator_id=creator,
+                guest_query_id=guest_query_id,
                 gift_url=validate_gift_url(offer_data["gift_url"]),
                 gift_name=str(offer_data["gift_name"])[:150],
                 stars_amount=parse_stars(str(offer_data["stars"])),
@@ -661,16 +712,55 @@ class Store:
             s.flush()
             return obj
 
-    def inline_action(self, offer_id: int, message_id: str, action: str):
+    def bind_guest_message(self, offer_id: int, message_id: str):
+        """Bind the answerGuestQuery result before accepting any unsigned callback."""
+        if not isinstance(message_id, str) or not message_id or len(message_id) > 512:
+            raise DomainError("Некорректное гостевое сообщение")
+        with self.db.transaction() as s:
+            offer = s.scalar(select(InlineOffer).where(InlineOffer.id == offer_id).with_for_update())
+            if offer is None or not offer.guest_query_id:
+                raise DomainError("Гостевой офер не найден")
+            if offer.guest_inline_message_id not in {None, message_id}:
+                raise DomainError("Несовпадение гостевого сообщения")
+            offer.guest_inline_message_id = message_id
+
+    def inline_action(self, offer_id: int, message_id: str, action: str,
+                      actor_id: int | None = None, guest: bool = False,
+                      guest_token: str | None = None):
         """Apply a DEMO status transition to one chosen inline message atomically."""
-        if not message_id or len(message_id) > 512:
+        if not isinstance(message_id, str) or not message_id or len(message_id) > 512:
             raise DomainError("Некорректное inline-сообщение")
         if action not in {"accept", "decline", "transfer", "instructions"}:
             raise DomainError("Неизвестная кнопка")
         with self.db.transaction() as s:
-            offer = s.get(InlineOffer, offer_id)
+            # Lock the template as well: the first per-message row doesn't exist
+            # yet, so locking only that row cannot serialize concurrent clicks.
+            offer = s.scalar(select(InlineOffer).where(InlineOffer.id == offer_id).with_for_update())
             if not offer:
                 raise DomainError("Тестовый офер не найден")
+            if actor_id is not None:
+                actor = s.get(User, actor_id)
+                if actor and actor.blocked:
+                    raise DomainError("Доступ заблокирован")
+                if actor_id == offer.creator_id and action in {"accept", "decline"}:
+                    raise DomainError("Офер предназначен собеседнику. Для своей проверки используйте /test")
+            if offer.guest_query_id:
+                if not guest:
+                    raise DomainError("Нужна оригинальная гостевая кнопка")
+                if guest_token is not None:
+                    import hmac
+                    from .guest_offers import guest_callback_token
+                    expected = guest_callback_token(self.config.bot_token, offer.id, offer.guest_query_id)
+                    if not hmac.compare_digest(expected, guest_token):
+                        raise DomainError("Неправильная гостевая кнопка")
+                if offer.guest_inline_message_id is None:
+                    if guest_token is None:
+                        raise DomainError("Доставка гостевого сообщения не подтверждена")
+                    # A signed callback is proof that Telegram delivered the
+                    # reply despite a lost answerGuestQuery HTTP response.
+                    offer.guest_inline_message_id = message_id
+                elif offer.guest_inline_message_id != message_id:
+                    raise DomainError("Несовпадение гостевого сообщения")
             row = s.execute(select(InlineMessageState).where(
                 InlineMessageState.inline_message_id == message_id).with_for_update()).scalar_one_or_none()
             if row is not None and row.inline_offer_id != offer_id:
@@ -680,6 +770,8 @@ class Store:
                                          inline_offer_id=offer_id, status="active",updated_at=utcnow())
                 s.add(row)
             current = row.status
+            if current == "expired":
+                return offer, current  # allow repair after a failed Telegram edit
             if current == "active" and aware(offer.expires_at) <= utcnow():
                 row.status = "expired"
             elif action != "instructions":

@@ -1,3 +1,5 @@
-· How does gift transfer work?
+🧪 DEMO · About accepting an offer
 
-The Transfer button  TRANSFER_REQUESTED .
+Pressing "Accept" only marks this demonstration offer as accepted and updates the card. No gift has been sold or transferred, and no Stars are charged or credited.
+
+Do not send NFTs to other accounts in exchange for promised automatic Stars payouts. Use Telegram's official interfaces for any actual operation and independently verify the transaction terms.

@@ -1,7 +1,6 @@
 """Strict, centralized Railway environment configuration."""
 from __future__ import annotations
 
-from functools import cached_property
 from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator, model_validator
@@ -9,7 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(extra="ignore", env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(extra="ignore", env_file=".env", env_file_encoding="utf-8",
+                                     hide_input_in_errors=True)
 
     bot_token: str = Field(alias="BOT_TOKEN")
     database_url: str = Field(alias="DATABASE_URL")
@@ -67,9 +67,21 @@ class Settings(BaseSettings):
     def valid_webhook(cls, v: str) -> str:
         v = v.strip().rstrip("/")
         s = urlsplit(v)
-        if s.scheme != "https" or not s.netloc or s.query or s.fragment:
-            raise ValueError("WEBHOOK_URL должен быть публичным HTTPS-URL без query и fragment")
+        try:
+            port = s.port
+        except ValueError:
+            raise ValueError("WEBHOOK_URL: некорректный порт") from None
+        if (s.scheme != "https" or not s.hostname or s.username or s.password
+                or s.path or s.query or s.fragment or port not in {None, 443, 80, 88, 8443}
+                or any(c.isspace() for c in v)):
+            raise ValueError("WEBHOOK_URL должен быть публичным HTTPS-адресом сервиса без пути, логина, query и fragment")
         return v
+
+    @field_validator("default_gift_url")
+    @classmethod
+    def valid_default_gift(cls, v: str) -> str:
+        from .states import validate_gift_url
+        return validate_gift_url(v)
 
     @field_validator("webhook_secret")
     @classmethod

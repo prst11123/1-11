@@ -1,6 +1,7 @@
 """All human-facing demo wording and HTML escaping centralized here."""
 from __future__ import annotations
 import html
+import re
 from datetime import timedelta
 from pathlib import Path
 from .states import aware, utcnow
@@ -27,14 +28,18 @@ def expiry_string(dt) -> str:
     return aware(dt).strftime("%d.%m.%Y %H:%M UTC")
 
 
-def offer_caption(o, preview=False) -> str:
+def offer_caption(o, preview=False, contact_username: str | None = None) -> str:
     parts=["🧪 <b>DEMO · NFT Gift Offer</b>", "", f"🎁 <b>{h(o.gift_name)}</b>",
            f"🔗 {h(o.gift_url)}", f"⭐ Предложение: <b>{o.stars_amount:,} Stars</b>".replace(",", " "),
            f"⏳ Действует до: <b>{expiry_string(o.expires_at)}</b>",
-           f"📍 Статус: <b>{STATUS_RU.get(o.status, o.status)}</b>"]
+           f"📍 Статус: <b>{h(STATUS_RU.get(o.status, o.status))}</b>"]
     if o.status == "accepted":
-        parts += ["", "✅ Предложение принято в демонстрационном режиме.",
-                  "Stars не списаны, NFT не передан.", "Передача ниже только имитируется."]
+        parts += ["", "✅ <b>Тестовое предложение принято</b>",
+                  "Это DEMO, а не подтверждение продажи подарка.",
+                  "NFT не передан. Stars не списаны и не начислены.",
+                  "Не отправляйте NFT для получения тестовой выплаты."]
+        if contact_username:
+            parts.append(f"🆘 Вопросы по DEMO: @{h(contact_username)}")
     elif o.status == "transfer_requested":
         parts += ["", "🧩 Демонстрационный запрос на передачу зарегистрирован.",
                   "NFT остаётся у текущего владельца. Выплаты не выполняются."]
@@ -45,7 +50,7 @@ def offer_caption(o, preview=False) -> str:
     else:
         parts += ["", "⚠️ Тестовый офер: без реальной оплаты и передачи NFT."]
     caption="\n".join(parts)
-    if len(caption)>1024:
+    if len(html.unescape(re.sub(r"<[^>]*>", "", caption)))>1024:
         # Telegram photo/document caption limit is 1024 chars (entities excluded).
         raise ValueError("Подпись Offer слишком длинная")
     return caption
@@ -81,13 +86,23 @@ def stats_text(d: dict):
     return "📊 <b>Статистика (DEMO)</b>\n\n"+"\n".join(f"{v}: <b>{d.get(k,0)}</b>" for k,v in labels)
 
 
-def test_offer_caption(status: str = "active") -> str:
+def test_offer_caption(status: str = "active", contact_username: str | None = None) -> str:
     """Exact button/layout smoke test, intentionally not a real NFT or payment."""
-    return ("🧪 <b>ТЕСТ · NFT Gift Offer (DEMO)</b>\n\n"
+    body = ("🧪 <b>ТЕСТ · NFT Gift Offer (DEMO)</b>\n\n"
             "🎁 <b>Example NFT (тестовый образец)</b>\n"
             "🔗 https://t.me/nft/Example-1\n"
             "⭐ Предложение: <b>1 000 Stars (DEMO)</b>\n"
             "⏳ Срок: <b>30 минут (тест)</b>\n"
-            f"📍 Статус: <b>{h(STATUS_RU.get(status,status))}</b>\n\n"
-            "⚠️ Это только проверка интерфейса. Изображение — заглушка; "
-            "Stars и NFT не передаются.")
+            f"📍 Статус: <b>{h(STATUS_RU.get(status,status))}</b>\n\n")
+    if status == "accepted":
+        body += ("✅ <b>Принято для тестирования.</b>\n"
+                 "Подарок не продан, NFT не передан, Stars не начислены.\n"
+                 "Не переводите подарок ради демонстрационной выплаты.")
+        if contact_username:
+            body += f"\n🆘 Вопросы: @{h(contact_username)}"
+    elif status == "declined":
+        body += "❌ Предложение отклонено. Это только тест."
+    else:
+        body += ("⚠️ Это только проверка интерфейса. Изображение — заглушка; "
+                 "Stars и NFT не передаются.")
+    return body

@@ -17,6 +17,7 @@ from . import keyboards as kb
 from . import render as rnd
 from .services.transfer import DemoTransferGateway
 from .quick_offer import parse_quick_offer
+from .guest_offers import parse_guest_invocation, guest_caption, guest_keyboard, guest_result, guest_callback_token
 from .gift_images import fetch_gift_image, GiftImageUnavailable, image_url
 
 log = logging.getLogger(__name__)
@@ -26,6 +27,8 @@ class AppHandler:
     def __init__(self, cfg: Settings, store: Store, tg: Telegram, transfer_gateway=None):
         self.cfg,self.store,self.tg = cfg,store,tg
         self.transfer_gateway = transfer_gateway or DemoTransferGateway()
+        self.bot_username = ""  # supplied by getMe at startup; do not trust arbitrary @mentions
+        self.guest_enabled = False  # reported by getMe: requires BotFather Guest Mode
 
     async def db(self, name: str, *args, **kwargs):
         return await asyncio.to_thread(getattr(self.store,name), *args, **kwargs)
@@ -64,6 +67,8 @@ class AppHandler:
                 await self.db("business_deleted",update["deleted_business_messages"])
             elif "inline_query" in update:
                 await self.on_inline_query(update["inline_query"])
+            elif "guest_message" in update:
+                await self.on_guest_message(update["guest_message"])
             elif "message" in update:
                 await self.on_message(update["message"])
             elif "callback_query" in update:
@@ -85,8 +90,18 @@ class AppHandler:
         """
         if (msg.get("chat") or {}).get("type") != "private":
             return
+        if msg.get("sender_business_bot") or (msg.get("from") or {}).get("is_bot"):
+            return
         raw = (msg.get("text") or msg.get("caption") or "").strip()
-        command = parse_quick_offer(raw)
+        demo_trigger = raw.casefold() in {"#тестофер", "/testoffer", "тестофер"}
+        if demo_trigger:
+            from .quick_offer import QuickOffer
+            from .states import validate_gift_url, default_gift_name
+            url=validate_gift_url(self.cfg.default_gift_url)
+            command=QuickOffer(url, default_gift_name(url), self.cfg.default_stars,
+                               self.cfg.default_expiration)
+        else:
+            command = parse_quick_offer(raw)
         if not command:
             return
         actor = (msg.get("from") or {}).get("id")
@@ -115,14 +130,26 @@ class AppHandler:
         media_kind = "document" if not photos and supplied else "photo"
         image_data = None
         if not supplied:
-            try:
-                image_data = await fetch_gift_image(command.gift_url)
-            except GiftImageUnavailable as e:
-                # Don't substitute a different NFT image or falsely confirm sending.
-                await self._notify_owner(actor,
-                    f"⚠️ Не получилось загрузить изображение <code>{rnd.h(command.gift_url)}</code>: {rnd.h(e)}. "
-                    "Отправьте в тот же Business-чат изображение нужного NFT с теми же тремя строками в подписи.")
-                return
+            if demo_trigger:
+                # Convert the local fixture to JPEG for Telegram upload and editing.
+                # A test trigger must not depend on Fragment being online.
+                from io import BytesIO
+                from PIL import Image
+                def demo_jpeg():
+                    with Image.open(self.cfg.default_image_path) as im:
+                        out=BytesIO()
+                        im.convert("RGB").save(out, format="JPEG", quality=88)
+                        return out.getvalue()
+                image_data = await asyncio.to_thread(demo_jpeg)
+            else:
+                try:
+                    image_data = await fetch_gift_image(command.gift_url)
+                except GiftImageUnavailable as e:
+                    await self._notify_owner(actor,
+                        f"⚠️ Не получилось загрузить изображение <code>{rnd.h(command.gift_url)}</code>: {rnd.h(e)}. "
+                        "Отправьте в тот же Business-чат изображение нужного NFT с теми же тремя строками в подписи.")
+                    return
+        # The local DEMO fixture is never presented as an image of a real collectible.
         payload = {"gift_url": command.gift_url, "gift_name": command.gift_name,
                    "stars": command.stars, "duration": command.duration,
                    "image_file_id": supplied, "media_kind": media_kind}
@@ -160,18 +187,29 @@ class AppHandler:
         uid=actor.get("id")
         if not uid:return
         text=(m.get("text") or m.get("caption") or "").strip()
+        # Telegram commands can include the bot username and arguments. A menu
+        # selection starts a new action, rather than becoming FAQ/contact input.
+        command = text.split(maxsplit=1)[0].split("@", 1)[0] if text else ""
+        commands = {"/start", "/cancel", "/test", "/testoffer", "/admin", "/diag",
+                    "/share", "/create", "/offers", "/business", "/stats", "/faq", "/help"}
+        if command in commands:
+            text = command
         started=text.split(" ")[0].split("@")[0] == "/start"
         user=await self.db("touch_user", actor, started)
+        menu_labels = {button["text"] for row in kb.main_menu(True)["keyboard"] for button in row}
+        if text in commands | menu_labels | {"🎁 Создать офер", "❓ Помощь"}:
+            await self.db("clear_flow", uid)
         if started:
             if user.blocked:
                 await self.say(uid,"⛔ Ваш аккаунт заблокирован")
             elif user.allowed:
                 await self.say(uid,"🧪 <b>DEMO NFT Gift Offer</b>\n\n"
-                               "Отправьте в Business-чате сообщение: ссылка NFT, Stars, срок. "
-                               "Бот попробует заменить ваше сообщение карточкой.\n"
-                               "Для других чатов включите inline-режим в @BotFather (/setinline), "
-                               "выберите офер после @имя_бота.\n"
-                               "Кнопка «🧪 Тест офера» проверяет интерфейс без получателя.\n\n"
+                               "Для пробы нажмите «🧪 Тест офера» — без Business-подключения.\n"
+                               "Для отправки в другой чат включите Guest Mode в Mini App BotFather: "
+                               "отправьте сообщение с @именем_бота и параметрами. "
+                               "Бот ответит карточкой в этом же чате без inline-поиска.\n"
+                               "В подключённом Business-чате можно отправить три строки: NFT-ссылка, Stars, срок. "
+                               "Бот попробует заменить исходное сообщение, если Telegram разрешает.\n\n"
                                "Реальных Stars или NFT-транзакций нет.",
                                kb.main_menu(user.role in {"owner","admin"}))
             else:
@@ -184,12 +222,24 @@ class AppHandler:
         if user.blocked:
             await self.say(uid,"⛔ Ваш аккаунт заблокирован")
             return
+        if text in {"❓ FAQ", "❓ Помощь", "/faq", "/help"}:
+            faq=await self.db("display_faq")
+            contact_username, _ = await self.db("display_contact")
+            info="❓ <b>FAQ · помощь и ошибки (DEMO)</b>\n\n"+rnd.h(faq)
+            if contact_username:
+                info+=f"\n\n🆘 Поддержка: @{rnd.h(contact_username)}"
+            else:
+                info+="\n\n🆘 Контакт поддержки ещё не указан администратором."
+            return await self.say(uid,info)
         if not user.allowed:
             await self.say(uid,"🔐 Нет доступа к боту. Напишите /start для получения Telegram ID.")
             return
         if text in {"🧪 Тест офера", "/test", "/testoffer"}:
             await self.tg.send_media(uid,None,"photo",rnd.test_offer_caption(),
                                      kb.test_offer_keyboard())
+            await self.say(uid,"Для отправки DEMO в другой чат выберите inline-результат. "
+                               "Включите inline-режим у @BotFather (/setinline). "
+                               "Получателю запускать бота не требуется.",kb.test_share_keyboard())
             return
         if text.split(" ")[0].split("@")[0] == "/admin" or text == "⚙️ Админ-панель":
             if user.role not in {"admin","owner"}:
@@ -218,8 +268,10 @@ class AppHandler:
                 f"Business-чаты: {local['known_chats']}\n"
                 f"С can_reply и входящим за 24 ч: {local['eligible_chats']}\n"
                 f"Business-подключения с видимыми чатами: {local['active_connections_in_known_chats']}\n"
-                f"С правом удаления: {local['with_delete_right']}\n\n"
-                + remote_text + "\n\nПроверка кнопок: /test. Для остальных чатов — inline через @имя_бота.")
+                f"С правом удаления: {local['with_delete_right']}\n"
+                f"Guest Mode: {'✅ включён' if self.guest_enabled else '⚠️ выключен — включите у BotFather'}\n"
+                f"Username: @{rnd.h(self.bot_username) if self.bot_username else 'не определён'}\n\n"
+                + remote_text + "\n\nПроверка кнопок: /test. Для Guest Mode упомяните @имя_бота с параметрами в нужном чате.")
         state,payload=await self.db("flow",uid)
         if state==ADMIN_INPUT:
             await self.admin_input(uid,text,payload)
@@ -227,10 +279,34 @@ class AppHandler:
         if state=="ADMIN_CONTACT_INPUT":
             await self.admin_contact_input(uid,text)
             return
+        if state=="ADMIN_FAQ_INPUT":
+            await self.admin_faq_input(uid,text)
+            return
         if state in {WAIT_URL,WAIT_STARS,WAIT_EXPIRATION,WAIT_IMAGE,WAIT_NAME,WAIT_TARGET}:
             await self.wizard_message(uid,m,state,payload)
             return
-        if text in {"🎁 Создать офер","/create"}:
+        if text in {"📤 В любой чат", "/share"}:
+            handle = "@" + self.bot_username if self.bot_username else "@имя_бота"
+            if not self.bot_username:
+                try:
+                    me = await self.tg.api("getMe")
+                    if (me or {}).get("username"):
+                        handle = "@" + str(me["username"])
+                except (AttributeError, TelegramError, TypeError):
+                    pass
+            handle = rnd.h(handle)
+            await self.say(uid, "📤 <b>Сообщение-карточка через Guest Mode</b>\n\n"
+                           "1. @BotFather → открой Mini App → выбери своего бота → включи Guest Mode.\n"
+                           "2. В любом разрешённом Telegram-чате отправь сообщение:\n"
+                           f"<code>{handle} https://t.me/nft/InputKey-25057 1900 15</code>\n\n"
+                           "Бот отправит в этот же чат отдельную DEMO-карточку с двумя кнопками. "
+                           "Не требуется, чтобы получатель запускал бота или писал тебе первым.\n\n"
+                           "Для теста можно отправить "
+                           f"<code>{handle} #тестофер</code>.\n"
+                           "Если ничего не появилось — проверь /diag и включение Guest Mode. "
+                           "Исходное сообщение и пометка бота останутся; "
+                           "секретные и защищённые чаты могут не поддерживаться.")
+        elif text in {"🎁 Создать офер", "/create"}:
             await self.start_wizard(uid)
         elif text in {"📋 Мои оферы","/offers"}:
             await self.show_my_offers(uid,0)
@@ -243,26 +319,6 @@ class AppHandler:
                 stats=await self.db("personal_stats",uid)
                 statuses="\n".join(f"{rnd.STATUS_RU.get(k,k)}: {v}" for k,v in stats["statuses"].items())
                 await self.say(uid,f"📊 <b>Моя статистика</b>\nСоздано: {stats['total']}\nОтправлено: {stats['sent']}\n{statuses}")
-        elif text in {"❓ Помощь","/help"}:
-            help_text=("🧪 <b>Помощь · DEMO</b>\n\n<b>Способ 1: в Business-чате</b>\n"
-                       "Отправьте собеседнику одно сообщение из трёх строк:\n"
-                       "<code>https://t.me/nft/PlushPepe-123</code>\n<code>1000</code>\n<code>15м</code>\n\n"
-                       "Бот отправит карточку в тот же чат. Если фото NFT не удалось получить автоматически, "
-                       "пришлите фото NFT с этими строками в подписи.\n\n"
-                       "Способ 2: в любом чате включите inline у @BotFather командой /setinline. "
-                       "Наберите @имя_бота, пробел, ссылку, Stars и минуты; "
-                       "выберите результат (фото или текст).\n\n"
-                       "Проверка кнопок: «🧪 Тест офера» в меню бота.\n\n"
-                       "Старый способ: «Создать офер» в меню бота.\n\n"
-                       "У Business-бота должно быть can_reply, а у собеседника — входящее сообщение "
-                       "в последние 24 часа. Исходное сообщение заменяется, если Telegram разрешает "
-                       "редактирование; иначе создаётся новое. Удаление команды возможно только с правом "
-                       "can_delete_all_messages. Stars и NFT не переводятся.")
-            contact_username, _ = await self.db("display_contact")
-            if contact_username:
-                help_text += (f"\n\n👤 Контакт для вопросов по DEMO: "
-                              f"@{rnd.h(contact_username)} (не для перевода NFT).")
-            await self.say(uid,help_text)
         else:
             await self.say(uid,"Выберите действие в меню или отправьте /help.",kb.main_menu(user.role in {"admin","owner"}))
 
@@ -406,6 +462,75 @@ class AppHandler:
                                      "offer_id":saved.id,"business_connection_id":saved.business_connection_id})
         return saved
 
+    async def on_guest_message(self, msg: dict):
+        """Answer a guest invocation in its original chat. No Business access needed.
+
+        Telegram sends guest_query_id only for a real eligible mention. We never
+        guess a recipient chat id, and only an approved creator may invoke it.
+        """
+        query_id = msg.get("guest_query_id")
+        sender = msg.get("from") or {}
+        actor = sender.get("id")
+        if not (isinstance(query_id, str) and query_id and
+                isinstance(actor, int) and self.bot_username) or sender.get("is_bot") or msg.get("sender_chat"):
+            return
+        if not await self.db("can_create", actor):
+            log.info("guest_offer_denied_unapproved_actor user_id=%s", actor)
+            return
+        command = parse_guest_invocation(msg.get("text") or msg.get("caption") or "", self.bot_username,
+                                         self.cfg.default_gift_url, self.cfg.default_stars,
+                                         self.cfg.default_expiration)
+        if command is None:
+            log.info("guest_offer_ignored_invalid_command user_id=%s", actor)
+            return
+        try:
+            template = await self.db("create_inline_offer", actor, vars(command), guest_query_id=query_id)
+        except IntegrityError:
+            return  # another webhook worker already claimed this guest query
+        if template is None:
+            return
+        token = guest_callback_token(self.cfg.bot_token, template.id, query_id)
+        # answerGuestQuery returns an inline_message_id if sent successfully.
+        # On timeout we do not retry: the guest reply may already be visible.
+        try:
+            sent = await self.tg.answer_guest(query_id, guest_result(template, token=token))
+        except TelegramError as e:
+            if e.status == 400:
+                # Some Telegram clients/proxies cannot generate the NFT link
+                # preview. Only a definitive API rejection permits fallback.
+                log.info("guest_preview_rejected_offer_text_only offer_id=%s", template.id)
+                try:
+                    sent = await self.tg.answer_guest(query_id, guest_result(template, with_preview=False, token=token))
+                except TelegramError as e2:
+                    log.warning("guest_offer_delivery_failed status=%s offer_id=%s", e2.status, template.id)
+                    return
+            else:
+                # A zero-status transport timeout is ambiguous; Telegram may
+                # already have posted the card. Never retry it blindly.
+                log.warning("guest_offer_delivery_failed status=%s offer_id=%s", e.status, template.id)
+                return
+        inline_id = (sent or {}).get("inline_message_id")
+        if inline_id:
+            await self.db("bind_guest_message", template.id, inline_id)
+        log.info("guest_offer_sent user_id=%s offer_id=%s", actor, template.id)
+
+    async def guest_callback(self, uid: int, cid: str, data: str, c: dict):
+        parts = data.split(":")
+        if len(parts) not in {3, 4} or parts[1] not in {"accept", "decline"}:
+            raise DomainError("Неизвестная гостевая кнопка")
+        inline_id = c.get("inline_message_id")
+        if not inline_id:
+            raise DomainError("Telegram не прислал идентификатор гостевого сообщения")
+        token = parts[2] if len(parts) == 4 else None
+        offer, status = await self.db("inline_action", int(parts[-1]), inline_id, parts[1],
+                                      actor_id=uid, guest=True, guest_token=token)
+        support, _ = await self.db("display_contact")
+        await self.tg.edit_guest_offer(
+            inline_id, guest_caption(offer, status, support),
+            guest_keyboard(offer.id, status, contact_username=support), offer.gift_url
+        )
+        return await self.tg.answer_callback(cid, "Статус DEMO обновлён")
+
     async def on_inline_query(self, query: dict):
         """Sendable in any chat without pretending Business bots have unlimited reach.
 
@@ -416,9 +541,19 @@ class AppHandler:
         sender = (query.get("from") or {}).get("id")
         if not query_id or not isinstance(sender,int):
             return
-        command = parse_quick_offer(query.get("query") or "")
-        if not command or not await self.db("can_create",sender):
+        if not await self.db("can_create",sender):
             return await self.tg.answer_inline(query_id,[])
+        raw=(query.get("query") or "").strip()
+        if not raw:
+            from .quick_offer import QuickOffer
+            from .states import validate_gift_url, default_gift_name
+            url=validate_gift_url(self.cfg.default_gift_url)
+            command=QuickOffer(url, default_gift_name(url), self.cfg.default_stars,
+                               self.cfg.default_expiration)
+        else:
+            command=parse_quick_offer(raw)
+            if not command:
+                return await self.tg.answer_inline(query_id,[])
         offer=await self.db("create_inline_offer",sender,vars(command))
         mock = SimpleNamespace(gift_name=offer.gift_name, gift_url=offer.gift_url,
                                stars_amount=offer.stars_amount, expires_at=offer.expires_at,
@@ -427,9 +562,9 @@ class AppHandler:
         title = f"DEMO {offer.gift_name} · {offer.stars_amount:,} Stars".replace(","," ")[:120]
         url = image_url(offer.gift_url)
         result_text={"type":"article", "id":f"o{offer.id}t", "title":"🧪 " + title,
-                     "description":"Текстовая карточка · всегда доступна", "input_message_content":{
+                     "description":"Карточка с предпросмотром ссылки на этот NFT", "input_message_content":{
                          "message_text":caption,"parse_mode":"HTML",
-                         "link_preview_options":{"is_disabled":True}},
+                         "link_preview_options":{"url":offer.gift_url,"prefer_large_media":True}},
                      "reply_markup":kb.inline_offer_keyboard(offer.id,offer.gift_url,"active","t")}
         result_photo={"type":"photo", "id":f"o{offer.id}p", "title":"🖼 " + title,
                       "description":"Фото из публичного источника, если доступно",
@@ -452,31 +587,35 @@ class AppHandler:
         inline_id=c.get("inline_message_id")
         if not inline_id:
             raise DomainError("Нужен оригинал inline-сообщения")
-        offer,status=await self.db("inline_action",int(offer_id),inline_id,action)
-        if action=="instructions":
+        if action in {"instructions", "transfer"}:
             return await self.tg.answer_callback(cid,
-                "DEMO: никаких реальных передач NFT или начислений Stars нет.",True)
+                "DEMO: сделка не совершена. Не переводите NFT ради обещанной выплаты Stars.",True)
+        offer,status=await self.db("inline_action",int(offer_id),inline_id,action,actor_id=uid)
         mock=SimpleNamespace(gift_name=offer.gift_name,gift_url=offer.gift_url,
                              stars_amount=offer.stars_amount,expires_at=offer.expires_at,
                              status=status)
-        await self.tg.edit_inline_offer(inline_id,rnd.offer_caption(mock),
-                                        kb.inline_offer_keyboard(offer.id,offer.gift_url,status,media),
+        support, _ = await self.db("display_contact")
+        await self.tg.edit_inline_offer(inline_id,rnd.offer_caption(mock,contact_username=support),
+                                        kb.inline_offer_keyboard(offer.id,offer.gift_url,status,media,support),
                                         photo=media=="p")
         return await self.tg.answer_callback(cid,"Действие DEMO сохранено")
 
     async def test_callback(self, uid: int, cid: str, data: str, c: dict):
+        if not await self.db("can_create", uid):
+            raise DomainError("Нет доступа к тесту")
         msg=c.get("message") or {}
         if (msg.get("chat") or {}).get("type")!="private" or (msg.get("chat") or {}).get("id")!=uid:
             raise DomainError("Тест доступен только в личном чате")
         action=data.split(":",1)[1]
-        if action=="instructions":
+        if action in {"instructions", "transfer"}:
             return await self.tg.answer_callback(cid,
-                "DEMO: подарок не передаётся, Stars не списываются и не начисляются.",True)
-        if action not in {"accept","decline","transfer"}:
+                "DEMO: продажа не состоялась, NFT отправлять не нужно, Stars не начисляются.",True)
+        if action not in {"accept","decline"}:
             raise DomainError("Неизвестное тестовое действие")
-        status={"accept":"accepted","decline":"declined","transfer":"transfer_requested"}[action]
-        caption=rnd.test_offer_caption(status)
-        await self.tg.edit_test_caption(uid,msg["message_id"],caption,kb.test_offer_keyboard(status))
+        status={"accept":"accepted","decline":"declined"}[action]
+        support, _ = await self.db("display_contact")
+        caption=rnd.test_offer_caption(status,contact_username=support)
+        await self.tg.edit_test_caption(uid,msg["message_id"],caption,kb.test_offer_keyboard(status,support))
         await self.tg.answer_callback(cid,"Тестовый статус изменён")
 
     async def on_callback(self,c:dict):
@@ -496,6 +635,8 @@ class AppHandler:
                 return await self.test_callback(uid,cid,data,c)
             if data.startswith("inline:"):
                 return await self.inline_callback(uid,cid,data,c)
+            if data.startswith("guest:"):
+                return await self.guest_callback(uid,cid,data,c)
             if data.startswith("offer:"):
                 return await self.offer_callback(uid,cid,data,c)
             if data.startswith("admin:"):
@@ -606,21 +747,19 @@ class AppHandler:
         # For forwarded/stale messages, the caller must be in the original Business Chat.
         message=c.get("message") or {}
         message_chat=(message.get("chat") or {}).get("id")
-        if message_chat != o.recipient_chat_id or message.get("message_id") != o.telegram_message_id:
+        if (message_chat != o.recipient_chat_id
+                or message.get("message_id") != o.telegram_message_id
+                or message.get("business_connection_id") != o.business_connection_id):
             raise DomainError("Кнопка не относится к исходному Business-сообщению")
-        if action=="instructions":
-            o=await self.db("open_instructions",offer_id,uid)
-            # Do not put contact information or branding in the Business chat.
-            info=rnd.instructions()
-            try:
-                await self.tg.send_message(o.recipient_chat_id,rnd.h(info),business_id=o.business_connection_id)
-                return await self.tg.answer_callback(cid,"Инструкция отправлена отдельным сообщением")
-            except TelegramError:
-                return await self.tg.answer_callback(cid,info[:195],True)
-        if action not in {"accept","decline","transfer"}:
-            raise DomainError("Неизвестная кнопка Offer")
+        if action == "instructions":
+            await self.db("open_instructions",offer_id,uid)
+            return await self.tg.answer_callback(cid,
+                "DEMO: сделка не совершена. Подарок передавать не нужно, Stars не начисляются.",True)
         if action == "transfer":
-            await self.transfer_gateway.validate_transfer_request(o,uid)
+            return await self.tg.answer_callback(cid,
+                "DEMO: отправлять NFT для получения Stars не нужно.",True)
+        if action not in {"accept","decline"}:
+            raise DomainError("Неизвестная кнопка Offer")
         updated,expired=await self.db("offer_transition",offer_id,uid,action)
         log.info("offer_action_saved",extra={"event":"OFFER_EXPIRED" if expired else "OFFER_"+action.upper(),
                                             "user_id":uid,"offer_id":offer_id,"business_connection_id":updated.business_connection_id})
@@ -630,7 +769,9 @@ class AppHandler:
     async def sync_offer(self,o):
         if not o.telegram_message_id or o.delivery_status != "sent":return
         try:
-            await self.tg.edit_caption(o,rnd.offer_caption(o),kb.offer_keyboard(o))
+            support, _ = await self.db("display_contact")
+            await self.tg.edit_caption(o,rnd.offer_caption(o,contact_username=support),
+                                       kb.offer_keyboard(o,support))
             await self.db("mark_synced",o.id,o.version)
         except TelegramError as e:
             if "message is not modified" in e.description.lower():
@@ -716,7 +857,7 @@ class AppHandler:
             await self.say(uid,f"⚠️ {rnd.h(e)}")
 
     async def admin_contact_input(self, uid: int, text: str):
-        """Only owner may update the DEMO information contact."""
+        """Admins may update the DEMO FAQ support contact."""
         try:
             if text.strip().lower() in {"сброс", "reset", "-"}:
                 username = None
@@ -731,9 +872,23 @@ class AppHandler:
         except DomainError as exc:
             await self.say(uid, f"⚠️ {rnd.h(exc)}\nВведите @username или «Сброс». Отмена — /cancel")
 
+    async def admin_faq_input(self, uid: int, text: str):
+        try:
+            faq = None if text.strip().lower() in {"сброс", "reset", "-"} else text
+            await self.db("set_faq_text", uid, faq)
+            await self.db("clear_flow",uid)
+            await self.say(uid,"✅ FAQ сохранён. Пользователи увидят новую версию по кнопке «❓ FAQ».",
+                           kb.inline([kb.btn("↩️ FAQ", "admin:faq")]))
+        except DomainError as exc:
+            await self.say(uid,f"⚠️ {rnd.h(exc)}\nОтправьте FAQ (30–3000 символов) или «Сброс». Отмена: /cancel")
+
     async def admin_callback(self,uid:int,cid:str,data:str,c:dict):
         parts=data.split(":")
         action=parts[1] if len(parts)>1 else ""
+        if not await self.db("is_admin", uid):
+            raise DomainError("Требуются права администратора")
+        # Back/reset/navigation must not leave an invisible input mode active.
+        await self.db("clear_flow", uid)
         await self.tg.answer_callback(cid)
         if action=="panel":
             return await self.show_admin(uid)
@@ -743,24 +898,36 @@ class AppHandler:
             return await self.say(uid,rnd.stats_text(await self.db("stats")),kb.inline([kb.btn("↩️ Админ-панель","admin:panel")]))
         if action=="business":
             return await self.show_connections(uid)
+        if action=="faq":
+            current=await self.db("display_faq")
+            text="❓ <b>Настройки FAQ</b>\n\n"+rnd.h(current)
+            rows=[[kb.btn("✏️ Изменить FAQ", "admin:faqedit"),kb.btn("♻️ Сброс", "admin:faqreset")],
+                  [kb.btn("↩️ Админ-панель", "admin:panel")]]
+            return await self.say(uid,text,{"inline_keyboard":rows})
+        if action=="faqedit":
+            await self.db("save_flow",uid,"ADMIN_FAQ_INPUT",{})
+            return await self.say(uid,"Пришлите новый текст FAQ одним сообщением (30–3000 символов). "
+                                      "Допускаются несколько строк. Для отмены: /cancel; сброс: «Сброс».")
+        if action=="faqreset":
+            await self.db("set_faq_text",uid,None)
+            return await self.say(uid,"✅ FAQ возвращён к стандартному тексту.",
+                                  kb.inline([kb.btn("↩️ FAQ", "admin:faq")]))
         if action=="contact":
             username, source = await self.db("display_contact")
-            user = await self.db("user", uid)
-            message=("👤 <b>Контакт по DEMO-оферам</b>\n"
+            message=("👤 <b>Контакт поддержки по DEMO</b>\n"
                      f"Текущее значение: <code>@{rnd.h(username)}</code>\n" if username else
                      "👤 <b>Контакт по DEMO-оферам</b>\nТекущее значение: не указан\n")
             message += f"Источник: <b>{rnd.h(source)}</b>\n"
             message += "Контакт предназначен только для справок. Он не является адресом передачи NFT."
             rows=[]
-            if user and user.role=="owner":
-                rows.append([kb.btn("✏️ Изменить юз", "admin:contactedit"),
+            if await self.db("is_admin", uid):
+                rows.append([kb.btn("✏️ Изменить юз поддержки", "admin:contactedit"),
                              kb.btn("♻️ Сброс к Railway", "admin:contactreset")])
             rows.append([kb.btn("↩️ Админ-панель", "admin:panel")])
             return await self.say(uid,message,{"inline_keyboard":rows})
         if action=="contactedit":
-            user = await self.db("user", uid)
-            if not user or user.role!="owner":
-                raise DomainError("Изменение контакта доступно только владельцу бота")
+            if not await self.db("is_admin", uid):
+                raise DomainError("Изменение контакта доступно администратору")
             await self.db("save_flow", uid, "ADMIN_CONTACT_INPUT", {})
             return await self.say(uid,"Отправьте @username контакта для справок по DEMO "
                                        "(5–32 латинских буквы, цифры или _).\n"

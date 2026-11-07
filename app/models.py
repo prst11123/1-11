@@ -143,7 +143,7 @@ class AppSetting(Base):
     """Persisted non-secret admin-controlled display settings."""
     __tablename__ = "app_settings"
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    value: Mapped[str] = mapped_column(String(256), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
     updated_by: Mapped[int | None] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
 
@@ -158,7 +158,11 @@ class InlineOffer(Base):
     stars_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    __table_args__ = (Index("ix_inline_offers_expiry", "expires_at"),)
+    guest_query_id: Mapped[str | None] = mapped_column(String(512))
+    guest_inline_message_id: Mapped[str | None] = mapped_column(String(512))
+    __table_args__ = (Index("ix_inline_offers_expiry", "expires_at"),
+                      Index("ix_inline_offers_guest_query", "guest_query_id", unique=True),
+                      Index("ix_inline_offers_guest_message", "guest_inline_message_id", unique=True))
 
 
 class InlineMessageState(Base):

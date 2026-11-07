@@ -75,13 +75,14 @@ async def webhook(request):
     if not app.get(READY_KEY):
         raise web.HTTPServiceUnavailable()
     provided=request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    if not hmac.compare_digest(provided,app[CONFIG_KEY].webhook_secret):
+    if not hmac.compare_digest(provided.encode("utf-8"),app[CONFIG_KEY].webhook_secret.encode("utf-8")):
         raise web.HTTPForbidden()
     try:
         body=await request.json()
     except (json.JSONDecodeError,ValueError):
         raise web.HTTPBadRequest()
-    if not isinstance(body,dict):
+    if (not isinstance(body,dict) or type(body.get("update_id")) is not int
+            or body["update_id"] < 0):
         raise web.HTTPBadRequest()
     try:
         await app[HANDLER_KEY].dispatch(body)
@@ -98,6 +99,8 @@ async def startup(app):
         await asyncio.to_thread(app[STORE_KEY].initialize_admins)
         await tg.start()
         me=await tg.api("getMe")
+        app[HANDLER_KEY].bot_username = (me.get("username") or "").lower()
+        app[HANDLER_KEY].guest_enabled = bool(me.get("supports_guest_queries"))
         log.info("telegram_authorized bot_id=%s username=%s",me.get("id"),me.get("username"))
         await tg.set_webhook(cfg.webhook_endpoint,cfg.webhook_secret)
         app[READY_KEY]=True
@@ -106,6 +109,7 @@ async def startup(app):
     except Exception:
         log.exception("service_startup_failed")
         await tg.close()
+        await asyncio.to_thread(app[STORE_KEY].db.close)
         raise
 
 

@@ -63,7 +63,8 @@ async def test_end_to_end_business_offer_demo(config,tmp_path):
 
     async def cb(actor,data,chat_id=1001,msg_id=1):
         await dispatch({"callback_query":{"id":f"c-{seq+1}","from":actor,"data":data,
-                                          "message":{"message_id":msg_id,"chat":{"id":chat_id,"type":"private"}}}})
+                                          "message":{"message_id":msg_id,"chat":{"id":chat_id,"type":"private"},
+                                                     **({"business_connection_id":"b_test"} if chat_id==2002 else {})}}})
 
     await dispatch({"business_connection":fake.remote})
     await dispatch({"business_message":{"message_id":10,"business_connection_id":"b_test",
@@ -90,9 +91,9 @@ async def test_end_to_end_business_offer_demo(config,tmp_path):
     await cb(recipient,f"offer:instructions:{o.id}",2002,o.telegram_message_id)
     assert store.stats()["instructions"] == 1
     await cb(recipient,f"offer:transfer:{o.id}",2002,o.telegram_message_id)
-    assert store.offer(o.id).status=="transfer_requested"
+    assert store.offer(o.id).status=="accepted"  # Legacy transfer button cannot trigger a transfer
     assert store.stats()["offers_sent"]==1
     assert store.stats()["offers_created"]==1
     assert any(x[0]=="edit_caption" and "Stars не списаны" in x[3] for x in fake.calls)
-    assert any(x[0]=="send_message" and x[1]==2002 and "Подарок не списывается" in x[3] for x in fake.calls)
+    assert not any(x[0]=="send_message" and x[1]==2002 and "Подарок не списывается" in x[3] for x in fake.calls)
     db.close()

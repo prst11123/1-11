@@ -62,9 +62,18 @@ async def fetch_gift_image(gift_url: str) -> bytes:
             async with session.get(url, allow_redirects=False, headers={"Accept": "image/jpeg"}) as resp:
                 if resp.status != 200 or not resp.headers.get("Content-Type", "").lower().startswith("image/"):
                     raise GiftImageUnavailable("Изображение этого NFT сейчас недоступно")
-                if int(resp.headers.get("Content-Length") or 0) > MAX_IMAGE_BYTES:
+                try:
+                    content_length = int(resp.headers.get("Content-Length") or 0)
+                except ValueError:
+                    raise GiftImageUnavailable("Некорректный размер изображения") from None
+                if content_length > MAX_IMAGE_BYTES:
                     raise GiftImageUnavailable("Изображение превышает лимит")
-                raw = await resp.content.read(MAX_IMAGE_BYTES + 1)
-                return await asyncio.to_thread(jpeg_bytes, raw)
+                # read(n) can return a partial network chunk before EOF.
+                raw = bytearray()
+                async for chunk in resp.content.iter_chunked(64 * 1024):
+                    raw.extend(chunk)
+                    if len(raw) > MAX_IMAGE_BYTES:
+                        raise GiftImageUnavailable("Изображение превышает лимит")
+                return await asyncio.to_thread(jpeg_bytes, bytes(raw))
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         raise GiftImageUnavailable("Не удалось загрузить изображение NFT") from e

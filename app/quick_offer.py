@@ -31,14 +31,17 @@ def parse_quick_offer(text: str) -> QuickOffer | None:
       /offer https://t.me/nft/PlushPepe-123 1000 15
     """
     tokens = text.strip().split()
-    if tokens and tokens[0].lower() in {"/offer", "офер", "/офер"}:
+    if tokens and tokens[0].lower() in {"/offer", "офер", "/офер", "-офер", "-offer"}:
         tokens = tokens[1:]
     if len(tokens) != 3:
         return None
     url, stars, duration = tokens
     if not (NFT_LINE.fullmatch(url) and STARS.fullmatch(stars) and DURATION.fullmatch(duration)):
         return None
-    gift_url = validate_gift_url(url)
+    try:
+        gift_url = validate_gift_url(url)
+    except ValueError:
+        return None
     gift_name = default_gift_name(gift_url)
     # Readable NFT #serial, not an unverified title obtained from an unknown website.
     slug = gift_url.rsplit("/", 1)[-1]

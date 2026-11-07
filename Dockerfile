@@ -10,4 +10,4 @@ COPY app ./app
 RUN chown -R app:app /app
 USER app
 EXPOSE 8080
-CMD ["sh", "-c", "python -m alembic upgrade head && python -m app.main"]
+CMD ["sh", "-c", "python -m alembic upgrade head && exec python -m app.main"]

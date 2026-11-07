@@ -51,7 +51,7 @@ def test_menu_replaces_create_with_test_and_faq():
     assert "📤 В любой чат" in names
     assert "❓ FAQ" in names
     assert "✏️ FAQ" in json.dumps(kb.admin_keyboard(),ensure_ascii=False)
-    assert any('switch_inline_query' in b for row in kb.test_offer_keyboard()['inline_keyboard'] for b in row)
+    assert any('switch_inline_query' in b for row in kb.test_share_keyboard()['inline_keyboard'] for b in row)
 
 
 @pytest.mark.asyncio
@@ -62,7 +62,7 @@ async def test_test_button_does_not_require_business_connection(config,v5_store)
     assert len(bot.media)==1
     assert "DEMO" in bot.media[-1][1]
     assert bot.media[-1][0]==1001
-    assert any('switch_inline_query' in b for row in bot.media[-1][2]['inline_keyboard'] for b in row)
+    assert any('switch_inline_query' in b for row in bot.messages[-1][2]['inline_keyboard'] for b in row)
 
 
 @pytest.mark.asyncio
@@ -187,4 +187,5 @@ async def test_share_message_uses_real_bot_username(config,v5_store):
     msg=bot.messages[-1][1]
     assert '@DemoNFTBot' in msg
     assert 'Business' not in msg
-    assert 'выберите карточку' in msg
+    assert 'Guest Mode' in msg
+    assert 'ответит' not in msg or 'карточку' in msg

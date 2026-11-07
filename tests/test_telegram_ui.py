@@ -15,7 +15,7 @@ def test_two_stage_buttons():
     assert any(b.get("callback_data")=="offer:accept:4" for row in active["inline_keyboard"] for b in row)
     assert not any("transfer" in b.get("callback_data","") for row in active["inline_keyboard"] for b in row)
     accepted=kb.offer_keyboard(offer("accepted"))
-    assert any(b.get("callback_data")=="offer:transfer:4" for row in accepted["inline_keyboard"] for b in row)
+    assert not any(b.get("callback_data")=="offer:transfer:4" for row in accepted["inline_keyboard"] for b in row)
     assert any(b.get("callback_data")=="offer:instructions:4" for row in accepted["inline_keyboard"] for b in row)
     assert len(kb.offer_keyboard(offer("declined"))["inline_keyboard"])==1
 

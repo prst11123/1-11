@@ -125,6 +125,10 @@ class InlineTelegram:
         self.edits=[]
         self.alerts=[]
         self.media=[]
+        self.messages=[]
+    async def send_message(self, chat_id, text, markup=None, business_id=None):
+        self.messages.append((chat_id, text, markup))
+        return {"message_id":890}
     async def answer_inline(self,id_,results):
         self.answers.append(results)
     async def edit_inline_offer(self,inline_message_id,text,markup,photo):
@@ -151,7 +155,7 @@ async def test_inline_in_any_chat_with_independent_statuses(v4_store,config):
     assert "InputKey #25057" in photo["caption"]
     assert "DEMO" in article["input_message_content"]["message_text"]
     offer_id=int(photo["id"][1:-1])
-    assert photo["reply_markup"]["inline_keyboard"][1][1]["callback_data"]==f"inline:accept:{offer_id}:p"
+    assert photo["reply_markup"]["inline_keyboard"][0][1]["callback_data"]==f"inline:accept:{offer_id}:p"
     # A second person can accept this independently in another selected inline chat.
     callback={"id":"cb-one","from":{"id":2002},"inline_message_id":"msg-one",
               "data":f"inline:accept:{offer_id}:p"}

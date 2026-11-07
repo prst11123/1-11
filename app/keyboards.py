@@ -12,10 +12,11 @@ def inline(*rows):
 
 
 def main_menu(admin=False):
+    # A test and an inline share need no Business connection or known recipient.
     keyboard=[
-        [{"text":"🎁 Создать офер"}, {"text":"📋 Мои оферы"}],
-        [{"text":"💼 Business подключения"}, {"text":"📊 Статистика"}],
-        [{"text":"🧪 Тест офера"}, {"text":"❓ Помощь"}],
+        [{"text":"🧪 Тест офера"}, {"text":"📤 В любой чат"}],
+        [{"text":"📋 Мои оферы"}, {"text":"💼 Business подключения"}],
+        [{"text":"📊 Статистика"}, {"text":"❓ FAQ"}],
     ]
     if admin:
         keyboard.append([{"text":"🔧 Диагностика"}, {"text":"⚙️ Админ-панель"}])
@@ -58,13 +59,14 @@ def target_keyboard(rows, page=0, total=0):
     return {"inline_keyboard":buttons}
 
 
-def offer_keyboard(o):
-    rows=[[btn("🔎 Показать подарок",url=o.gift_url)]]
+def offer_keyboard(o, contact_username: str | None = None):
+    rows=[] if o.status == "active" else [[btn("🔎 Показать подарок",url=o.gift_url)]]
     if o.status == "active":
-        rows.append([btn("Отклонить",f"offer:decline:{o.id}"),btn("Принять",f"offer:accept:{o.id}")])
+        rows.append([btn("✕ Отклонить",f"offer:decline:{o.id}"),btn("✓ Принять",f"offer:accept:{o.id}")])
     elif o.status == "accepted":
-        rows.append([btn("Передать (DEMO)",f"offer:transfer:{o.id}")])
-        rows.append([btn("Как передать?",f"offer:instructions:{o.id}")])
+        rows.append([btn("ℹ️ Что означает DEMO?",f"offer:instructions:{o.id}")])
+        if contact_username:
+            rows.append([btn("🆘 Поддержка",url=f"https://t.me/{contact_username}")])
     return inline(*rows)
 
 
@@ -75,7 +77,7 @@ def admin_keyboard():
                   [btn("🛡 Администраторы", "admin:admins")],
                   [btn("💼 Business Connections", "admin:business"),btn("🎁 Offers", "admin:offers:0")],
                   [btn("🎯 Текущий получатель", "admin:target")],
-                  [btn("✏️ Изменить юз (DEMO)", "admin:contact")],
+                  [btn("✏️ FAQ", "admin:faq"), btn("👤 Контакт поддержки", "admin:contact")],
                   [btn("🧾 Логи", "admin:logs:0"),btn("📑 Admin Audit", "admin:audit:0")],
                   [btn("↩️ Назад", "admin:home")])
 
@@ -98,24 +100,32 @@ def page_keyboard(prefix: str, page: int, total: int, extra=None):
     return {"inline_keyboard":buttons}
 
 
-def test_offer_keyboard(status: str = "active"):
-    rows=[[btn("🔎 Пример NFT", url="https://t.me/nft/Example-1")]]
+def test_offer_keyboard(status: str = "active", contact_username: str | None = None):
+    rows=[]
     if status == "active":
-        rows.append([btn("Отклонить", "test:decline"), btn("Принять", "test:accept")])
+        rows.append([btn("✕ Отклонить", "test:decline"), btn("✓ Принять", "test:accept")])
     elif status == "accepted":
-        rows.append([btn("Передать (DEMO)", "test:transfer")])
-        rows.append([btn("Как передать?", "test:instructions")])
+        rows.append([btn("ℹ️ Что означает DEMO?", "test:instructions")])
+        if contact_username:
+            rows.append([btn("🆘 Поддержка",url=f"https://t.me/{contact_username}")])
     return inline(*rows)
 
 
-def inline_offer_keyboard(offer_id: int, gift_url: str, status: str, media: str):
+def test_share_keyboard():
+    """Keep sharing separate from the offer's two decision buttons."""
+    return inline([{"text":"📤 Отправить DEMO в другой чат", "switch_inline_query":""}])
+
+
+def inline_offer_keyboard(offer_id: int, gift_url: str, status: str, media: str,
+                          contact_username: str | None = None):
     # Inline messages carry no business_connection_id; callbacks resolve a
     # database template and a per-inline-message state.
-    rows=[[btn("🔎 Показать подарок", url=gift_url)]]
+    rows=[] if status == "active" else [[btn("🔎 Показать подарок", url=gift_url)]]
     if status == "active":
-        rows.append([btn("Отклонить", f"inline:decline:{offer_id}:{media}"),
-                     btn("Принять", f"inline:accept:{offer_id}:{media}")])
+        rows.append([btn("✕ Отклонить", f"inline:decline:{offer_id}:{media}"),
+                     btn("✓ Принять", f"inline:accept:{offer_id}:{media}")])
     elif status == "accepted":
-        rows.append([btn("Передать (DEMO)", f"inline:transfer:{offer_id}:{media}")])
-        rows.append([btn("Как передать?", f"inline:instructions:{offer_id}:{media}")])
+        rows.append([btn("ℹ️ Что означает DEMO?", f"inline:instructions:{offer_id}:{media}")])
+        if contact_username:
+            rows.append([btn("🆘 Поддержка",url=f"https://t.me/{contact_username}")])
     return inline(*rows)

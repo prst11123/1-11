@@ -14,7 +14,7 @@
 |---|---|---|
 | Runtime | Python 3.12 | Mature deployment/runtime |
 | HTTP + Telegram Bot API | aiohttp + direct official HTTPS requests | No non-official MTProto methods; full control of new Business Bot API fields |
-| Webhook | aiohttp web.Application | Public HTTPS webhook served by Railway domain; optional secret header |
+| Webhook | aiohttp web.Application | Public HTTPS webhook served by Railway domain; required secret header |
 | DB | Railway PostgreSQL | Persistent, transactional; row locks and SKIP LOCKED |
 | Database mapper | SQLAlchemy 2 | Clear business models and transaction boundaries |
 | Migrations | Alembic | Versioned schema |
@@ -55,7 +55,7 @@ Wizard: WAIT_URL -> WAIT_STARS -> WAIT_EXPIRATION -> WAIT_IMAGE -> WAIT_NAME
      -> WAIT_TARGET -> PREVIEW -> send/edit/cancel
 Offer: draft -(confirmed Telegram send)-> active -(recipient accepts)-> accepted
              |                         |                           |
-             |                         +- declined                 +- transfer_requested (DEMO)
+             |                         +- declined                 +- DEMO information/support
              |                         +- expired
              |                         +- cancelled
              +- cancelled
@@ -75,7 +75,15 @@ An outgoing owner's `business_message` is parsed only when its entire text/capti
 ## V5: интерфейс и FAQ
 
 - В меню вместо мастера «Создать офер» показывается «🧪 Тест офера», карточка доступна без Business. Старый мастер сохранён по `/create` для совместимости.
-- В PM-карточку добавлено `switch_inline_query` для явного выбора другого чата; пустой inline-запрос показывает DEMO-шаблон.
+- В отдельном сообщении под PM-карточкой доступно `switch_inline_query` для явного выбора другого чата; сама активная карточка содержит ровно две кнопки. Пустой inline-запрос показывает DEMO-шаблон.
 - В разрешённом Business-чате исходящее `#тестофер` от владельца запускает тестовый сценарий с локальным JPEG, не зависящий от внешнего сервиса.
-- AppSetting.value расширено до Text миграцией 0005. FAQ (обычный экранируемый текст 30–3000 символов) и username поддержки меняются администраторами. Влияние этих настроек ограничено личными сообщениями бота.
-- Проект не получает доступа к обычным личным чатам вне Business/inline и не может заменять любое произвольное сообщение там.
+- AppSetting.value расширено до Text миграцией 0005. FAQ (обычный экранируемый текст 30–3000 символов) и username поддержки меняются администраторами. Контакт применяется и к новым результатам принятия публичных DEMO-карточек.
+- Проект не читает произвольные личные чаты и не заменяет любые сообщения. Guest Mode позволяет ответить на явное упоминание в поддерживаемом чате.
+
+## V7: Guest Mode и проверка доставки
+
+Guest Mode использует `guest_message` → `answerGuestQuery`, без запуска бота получателем. Миграция `0006_guest_bindings` сохраняет одноразовый query ID и возвращённый inline message ID. Новые Guest-кнопки подписаны HMAC; неопределённая доставка не повторяется, но подписанный callback позволяет восстановить привязку.
+
+Guest/inline показывают ссылку конкретного NFT и запрашивают native preview; отображение зависит от Telegram. Фото-результат inline использует публичный Fragment CDN как необязательный источник. После принятия показывается DEMO без реальной сделки. Проверка срока выполняется атомарно при нажатии; автоматическое редактирование по таймеру выполняется только для Business-карточек. Старые transfer callbacks отвечают справкой, прежний демонстрационный доменный статус сохранён для совместимости.
+
+PostgreSQL использует транзакции и блокировки строк. SQLite в памяти разделяет одно соединение между потоками и сериализует транзакции; это поддержка локальных тестов, не замена Railway PostgreSQL.
