@@ -70,3 +70,12 @@ A genuine Telegram Gift Offer or NFT/Stars transfer must use officially supporte
 ## Business-chat quick-offer (v2)
 
 An outgoing owner's `business_message` is parsed only when its entire text/caption contains three fields (NFT URL, positive Stars count, duration). Server authorizes creator against the active connection owner, DB whitelist, bot reply rights and recent incoming client message. The offer is bound to `msg.chat.id` and `msg.business_connection_id`, **ignoring the global Railway TARGET**, and saved with `source_message_id` for deduplication. It then attempts `sendPhoto` with a freshly downloaded photo of the NFT from the known Fragment CDN (`https://nft.fragment.com/gift/<slug-lower>.medium.jpg`) and the same callback state machine. If media download fails, it does not claim the offer was sent: the owner can instead attach their own photo with the three fields in the caption. The image fetch is from a fixed host, with MIME/size checks and Pillow verification. Data migrations: `0002_business_chat_commands`. Bot replies are visible to both chat participants, explicitly labeled DEMO.
+
+
+## V5: интерфейс и FAQ
+
+- В меню вместо мастера «Создать офер» показывается «🧪 Тест офера», карточка доступна без Business. Старый мастер сохранён по `/create` для совместимости.
+- В PM-карточку добавлено `switch_inline_query` для явного выбора другого чата; пустой inline-запрос показывает DEMO-шаблон.
+- В разрешённом Business-чате исходящее `#тестофер` от владельца запускает тестовый сценарий с локальным JPEG, не зависящий от внешнего сервиса.
+- AppSetting.value расширено до Text миграцией 0005. FAQ (обычный экранируемый текст 30–3000 символов) и username поддержки меняются администраторами. Влияние этих настроек ограничено личными сообщениями бота.
+- Проект не получает доступа к обычным личным чатам вне Business/inline и не может заменять любое произвольное сообщение там.
