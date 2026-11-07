@@ -108,6 +108,11 @@ def demo_acceptance_notice() -> str:
             "Ничего переводить не нужно.")
 
 
+def demo_transfer_notice() -> str:
+    return ("Это демо-бот. Передача NFT и начисление Stars здесь не выполняются. "
+            "Ничего переводить не нужно.")
+
+
 def test_offer_caption(status: str = "active", contact_username: str | None = None) -> str:
     """Exact button/layout smoke test, intentionally not a real NFT or payment."""
     body = ("🧪 <b>ТЕСТ · NFT Gift Offer (DEMO)</b>\n\n"

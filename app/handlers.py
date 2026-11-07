@@ -557,7 +557,7 @@ class AppHandler:
         offer, status = await self.db("inline_action", int(parts[-1]), inline_id, parts[1],
                                       actor_id=uid, guest=True, guest_token=token)
         if parts[1] == "instructions":
-            return await self.tg.answer_callback(cid, rnd.demo_acceptance_notice(), True)
+            return await self.tg.answer_callback(cid, rnd.demo_transfer_notice(), True)
         support, _ = await self.db("display_contact")
         canonical_id = offer.guest_inline_message_id or inline_id
         button_token = guest_callback_token(self.cfg.bot_token, offer.id, offer.guest_query_id)
@@ -630,8 +630,7 @@ class AppHandler:
         if not inline_id:
             raise DomainError("Нужен оригинал inline-сообщения")
         if action in {"instructions", "transfer"}:
-            return await self.tg.answer_callback(cid,
-                "DEMO: сделка не совершена. Не переводите NFT ради обещанной выплаты Stars.",True)
+            return await self.tg.answer_callback(cid, rnd.demo_transfer_notice(), True)
         offer,status=await self.db("inline_action",int(offer_id),inline_id,action,actor_id=uid)
         mock=SimpleNamespace(gift_name=offer.gift_name,gift_url=offer.gift_url,
                              stars_amount=offer.stars_amount,expires_at=offer.expires_at,
@@ -652,8 +651,7 @@ class AppHandler:
             raise DomainError("Тест доступен только в личном чате")
         action=data.split(":",1)[1]
         if action in {"instructions", "transfer"}:
-            return await self.tg.answer_callback(cid,
-                "DEMO: продажа не состоялась, NFT отправлять не нужно, Stars не начисляются.",True)
+            return await self.tg.answer_callback(cid, rnd.demo_transfer_notice(), True)
         if action not in {"accept","decline"}:
             raise DomainError("Неизвестное тестовое действие")
         status={"accept":"accepted","decline":"declined"}[action]
@@ -803,8 +801,7 @@ class AppHandler:
             raise DomainError("Кнопка не относится к исходному Business-сообщению")
         if action == "instructions":
             await self.db("open_instructions",offer_id,uid)
-            return await self.tg.answer_callback(cid,
-                "DEMO: сделка не совершена. Подарок передавать не нужно, Stars не начисляются.",True)
+            return await self.tg.answer_callback(cid, rnd.demo_transfer_notice(), True)
         if action == "transfer":
             return await self.tg.answer_callback(cid,
                 "DEMO: отправлять NFT для получения Stars не нужно.",True)

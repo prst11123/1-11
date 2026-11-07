@@ -202,7 +202,7 @@ async def test_inline_in_any_chat_with_independent_statuses(v4_store,config):
         "id":"cb-three","from":{"id":2002},"inline_message_id":"msg-one",
         "data":f"inline:transfer:{offer_id}:p"}})
     assert "Отклонён" in bot.edits[-1][1]  # no new edit was made
-    assert "DEMO" in bot.alerts[-1][1]
+    assert "Это демо-бот" in bot.alerts[-1][1]
     assert "A/X" not in bot.edits[-1][1]
     assert v4_store.inline_action(offer_id,"msg-two","instructions")[1]=="declined"
 

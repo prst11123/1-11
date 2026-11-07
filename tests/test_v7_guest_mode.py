@@ -87,7 +87,7 @@ async def test_guest_accept_from_user_who_has_never_started_bot(guest_store, con
     inline_id,text,markup,gift_url=tg.edited[0]
     assert inline_id=="guestMsg1" and gift_url=="https://t.me/nft/InputKey-25057"
     assert "Принято (DEMO)" in text and "не начислены" in text
-    assert markup["inline_keyboard"][0][0]["text"] == "ℹ️ Что означает DEMO?"
+    assert markup["inline_keyboard"][0][0]["text"] == "Как передать?"
     assert tg.callbacks[-1][2] is True
     assert "NFT не передан" in tg.callbacks[-1][1]
     assert len(tg.callbacks)==1

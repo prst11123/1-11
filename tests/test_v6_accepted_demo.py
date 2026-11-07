@@ -55,6 +55,7 @@ def test_second_stage_keyboard_is_not_transfer_request():
         buttons = [button for row in markup["inline_keyboard"] for button in row]
         labels = " ".join(b["text"] for b in buttons)
         assert "Передать" not in labels
+        assert any(b["text"] == "Как передать?" for b in buttons)
         assert any(b.get("url") == "https://t.me/help_team" for b in buttons)
         assert not any("transfer" in b.get("callback_data","") for b in buttons)
 
@@ -98,6 +99,7 @@ async def test_old_private_transfer_button_is_safe_and_readonly(config,v6_store)
     assert not bot.edits
     assert len(bot.callbacks)==1 and bot.callbacks[0][2] is True
     assert "не нужно" in bot.callbacks[0][1]
+    assert "Это демо-бот" in bot.callbacks[0][1]
 
 
 @pytest.mark.asyncio

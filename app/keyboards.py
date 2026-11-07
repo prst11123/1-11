@@ -64,7 +64,7 @@ def offer_keyboard(o, contact_username: str | None = None):
     if o.status == "active":
         rows.append([btn("✕ Отклонить",f"offer:decline:{o.id}"),btn("✓ Принять",f"offer:accept:{o.id}")])
     elif o.status == "accepted":
-        rows.append([btn("ℹ️ Что означает DEMO?",f"offer:instructions:{o.id}")])
+        rows.append([btn("Как передать?",f"offer:instructions:{o.id}")])
         if contact_username:
             rows.append([btn("🆘 Поддержка",url=f"https://t.me/{contact_username}")])
     return inline(*rows)
@@ -105,7 +105,7 @@ def test_offer_keyboard(status: str = "active", contact_username: str | None = N
     if status == "active":
         rows.append([btn("✕ Отклонить", "test:decline"), btn("✓ Принять", "test:accept")])
     elif status == "accepted":
-        rows.append([btn("ℹ️ Что означает DEMO?", "test:instructions")])
+        rows.append([btn("Как передать?", "test:instructions")])
         if contact_username:
             rows.append([btn("🆘 Поддержка",url=f"https://t.me/{contact_username}")])
     return inline(*rows)
@@ -125,7 +125,7 @@ def inline_offer_keyboard(offer_id: int, gift_url: str, status: str, media: str,
         rows.append([btn("✕ Отклонить", f"inline:decline:{offer_id}:{media}"),
                      btn("✓ Принять", f"inline:accept:{offer_id}:{media}")])
     elif status == "accepted":
-        rows.append([btn("ℹ️ Что означает DEMO?", f"inline:instructions:{offer_id}:{media}")])
+        rows.append([btn("Как передать?", f"inline:instructions:{offer_id}:{media}")])
         if contact_username:
             rows.append([btn("🆘 Поддержка",url=f"https://t.me/{contact_username}")])
     return inline(*rows)

@@ -59,7 +59,7 @@ def guest_keyboard(offer_id: int, status: str = "active", token: str | None = No
                    contact_username: str | None = None) -> dict:
     if status == "accepted":
         suffix = f"{token}:{offer_id}" if token else str(offer_id)
-        rows = [[{"text": "ℹ️ Что означает DEMO?", "callback_data": f"guest:instructions:{suffix}"}]]
+        rows = [[{"text": "Как передать?", "callback_data": f"guest:instructions:{suffix}"}]]
         if contact_username:
             rows.append([{"text": "🆘 Поддержка", "url": f"https://t.me/{contact_username}"}])
         return {"inline_keyboard": rows}

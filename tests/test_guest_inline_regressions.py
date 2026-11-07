@@ -108,10 +108,13 @@ async def test_guest_aliases_share_one_status_and_demo_modal(guest_app):
     assert "Ничего переводить не нужно" in bot.callbacks[-1][1]
     assert len(bot.callbacks[-1][1]) <= 195
     info = bot.edits[-1][2]["inline_keyboard"][0][0]["callback_data"]
+    assert bot.edits[-1][2]["inline_keyboard"][0][0]["text"] == "Как передать?"
     assert info.startswith("guest:instructions:") and len(info.encode()) <= 64
     await click(handler, info, "another-participant-alias", cid="info")
     assert len(bot.edits) == 1  # information does not modify the offer
     assert bot.callbacks[-1][2] is True
+    assert "Это демо-бот" in bot.callbacks[-1][1]
+    assert "Ничего переводить не нужно" in bot.callbacks[-1][1]
     await click(handler, button(bot, 0), "recipient-alias", cid="decline-after-accept")
     assert len(bot.edits) == 1
     with store.db.transaction() as session:
