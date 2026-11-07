@@ -288,6 +288,8 @@ async def test_diagnostics_reports_webhook_status(v4_store,config):
             super().__init__()
             self.messages=[]
         async def api(self,method,**kwargs):
+            if method == "getMe":
+                return {"username": "demo_bot", "supports_guest_queries": False, "supports_inline_queries": True}
             assert method=="getWebhookInfo"
             return {"url":config.webhook_endpoint,"pending_update_count":0,"last_error_message":""}
         async def send_message(self, chat_id, text, markup=None, business_id=None):

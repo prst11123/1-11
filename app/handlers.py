@@ -29,9 +29,17 @@ class AppHandler:
         self.transfer_gateway = transfer_gateway or DemoTransferGateway()
         self.bot_username = ""  # supplied by getMe at startup; do not trust arbitrary @mentions
         self.guest_enabled = False  # reported by getMe: requires BotFather Guest Mode
+        self.inline_enabled = False
 
     async def db(self, name: str, *args, **kwargs):
         return await asyncio.to_thread(getattr(self.store,name), *args, **kwargs)
+
+    async def refresh_bot_capabilities(self):
+        """BotFather settings can change without a container restart."""
+        me = await self.tg.api("getMe")
+        self.bot_username = (me.get("username") or "").lower()
+        self.guest_enabled = bool(me.get("supports_guest_queries"))
+        self.inline_enabled = bool(me.get("supports_inline_queries"))
 
     async def dispatch(self, update: dict):
         update_id=update.get("update_id")
@@ -252,6 +260,12 @@ class AppHandler:
             if local is None:
                 return await self.say(uid,"Диагностика доступна только администратору")
             try:
+                await self.refresh_bot_capabilities()
+                guest_status = '✅ включён' if self.guest_enabled else '⚠️ выключен — включите Guest Mode в Mini App BotFather'
+                inline_status = '✅ включён' if self.inline_enabled else '⚠️ выключен — включите /setinline у BotFather'
+            except (TelegramError, AttributeError):
+                guest_status = inline_status = '⚠️ не удалось проверить текущее состояние Telegram'
+            try:
                 hook=await self.tg.api("getWebhookInfo")
                 actual=hook.get("url") or "(пусто)"
                 expected=self.cfg.webhook_endpoint
@@ -269,7 +283,9 @@ class AppHandler:
                 f"С can_reply и входящим за 24 ч: {local['eligible_chats']}\n"
                 f"Business-подключения с видимыми чатами: {local['active_connections_in_known_chats']}\n"
                 f"С правом удаления: {local['with_delete_right']}\n"
-                f"Guest Mode: {'✅ включён' if self.guest_enabled else '⚠️ выключен — включите у BotFather'}\n"
+                f"Guest Mode: {guest_status}\n"
+                f"Inline Mode: {inline_status}\n"
+                f"Ваш Telegram ID: <code>{uid}</code>; создание оферов: {'✅ разрешено' if user.allowed and not user.blocked else '⚠️ запрещено'}\n"
                 f"Username: @{rnd.h(self.bot_username) if self.bot_username else 'не определён'}\n\n"
                 + remote_text + "\n\nПроверка кнопок: /test. Для Guest Mode упомяните @имя_бота с параметрами в нужном чате.")
         state,payload=await self.db("flow",uid)
@@ -286,6 +302,10 @@ class AppHandler:
             await self.wizard_message(uid,m,state,payload)
             return
         if text in {"📤 В любой чат", "/share"}:
+            try:
+                await self.refresh_bot_capabilities()
+            except (TelegramError, AttributeError):
+                pass
             handle = "@" + self.bot_username if self.bot_username else "@имя_бота"
             if not self.bot_username:
                 try:
@@ -305,7 +325,11 @@ class AppHandler:
                            f"<code>{handle} #тестофер</code>.\n"
                            "Если ничего не появилось — проверь /diag и включение Guest Mode. "
                            "Исходное сообщение и пометка бота останутся; "
-                           "секретные и защищённые чаты могут не поддерживаться.")
+                           "секретные и защищённые чаты могут не поддерживаться.\n\n"
+                           + ("Guest Mode по последней проверке выключен. " if not self.guest_enabled else "")
+                           + "Запасной способ: включите /setinline, наберите ту же строку в поле ввода и "
+                           "выберите DEMO-результат до отправки. Простое отправленное упоминание не запускает inline. "
+                           "Упоминание вводите обычным текстом, без форматирования кода.", kb.test_share_keyboard())
         elif text in {"🎁 Создать офер", "/create"}:
             await self.start_wizard(uid)
         elif text in {"📋 Мои оферы","/offers"}:

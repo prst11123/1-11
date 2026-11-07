@@ -101,6 +101,9 @@ async def startup(app):
         me=await tg.api("getMe")
         app[HANDLER_KEY].bot_username = (me.get("username") or "").lower()
         app[HANDLER_KEY].guest_enabled = bool(me.get("supports_guest_queries"))
+        app[HANDLER_KEY].inline_enabled = bool(me.get("supports_inline_queries"))
+        log.info("bot_capabilities guest=%s inline=%s business=%s", bool(me.get("supports_guest_queries")),
+                 bool(me.get("supports_inline_queries")), bool(me.get("can_connect_to_business")))
         log.info("telegram_authorized bot_id=%s username=%s",me.get("id"),me.get("username"))
         await tg.set_webhook(cfg.webhook_endpoint,cfg.webhook_secret)
         app[READY_KEY]=True

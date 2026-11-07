@@ -185,7 +185,7 @@ async def test_share_message_uses_real_bot_username(config,v5_store):
     h=AppHandler(config,v5_store,bot)
     await h.on_message({"chat":{"id":1001,"type":"private"},"from":{"id":1001},"text":"📤 В любой чат"})
     msg=bot.messages[-1][1]
-    assert '@DemoNFTBot' in msg
+    assert '@demonftbot' in msg.casefold()
     assert 'Business' not in msg
     assert 'Guest Mode' in msg
     assert 'ответит' not in msg or 'карточку' in msg
