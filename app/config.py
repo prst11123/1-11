@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     default_gift_name: str = Field(default="NFT Gift", alias="DEFAULT_GIFT_NAME")
     default_image_path: str = Field(default="app/assets/fallback.png", alias="DEFAULT_IMAGE_PATH")
     expiration_sweep_seconds: int = Field(default=20, ge=5, le=300, alias="EXPIRATION_SWEEP_SECONDS")
+    business_edit_text: bool = Field(default=False, alias="BUSINESS_EDIT_TEXT")
 
     @field_validator("target_chat_id", "target_user_id", mode="before")
     @classmethod

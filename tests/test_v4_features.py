@@ -73,6 +73,7 @@ async def setup_business(store, bot):
 
 @pytest.mark.asyncio
 async def test_successful_business_edit_replaces_outbound_message(v4_store,config,monkeypatch):
+    config = config.model_copy(update={"business_edit_text": True})
     bot=EditingTelegram()
     msg=await setup_business(v4_store,bot)
     async def jpeg(_):return b"jpeg"
@@ -89,6 +90,7 @@ async def test_successful_business_edit_replaces_outbound_message(v4_store,confi
 
 @pytest.mark.asyncio
 async def test_edit_rejected_fallback_then_delete_only_with_rights(v4_store,config,monkeypatch):
+    config = config.model_copy(update={"business_edit_text": True})
     bot=EditingTelegram(edit_error=TelegramError("editMessageMedia",400,"message can't be edited"))
     msg=await setup_business(v4_store,bot)
     async def jpeg(_):return b"jpeg"
@@ -100,6 +102,7 @@ async def test_edit_rejected_fallback_then_delete_only_with_rights(v4_store,conf
 
 @pytest.mark.asyncio
 async def test_no_delete_without_permission(v4_store,config,monkeypatch):
+    config = config.model_copy(update={"business_edit_text": True})
     bot=EditingTelegram(edit_error=TelegramError("editMessageMedia",403,"Forbidden"),delete_allowed=False)
     msg=await setup_business(v4_store,bot)
     async def jpeg(_):return b"jpeg"
@@ -110,6 +113,7 @@ async def test_no_delete_without_permission(v4_store,config,monkeypatch):
 
 @pytest.mark.asyncio
 async def test_uncertain_edit_never_duplicates_or_deletes(v4_store,config,monkeypatch):
+    config = config.model_copy(update={"business_edit_text": True})
     bot=EditingTelegram(edit_error=TelegramError("editMessageMedia",0,"timeout"))
     msg=await setup_business(v4_store,bot)
     async def jpeg(_):return b"jpeg"

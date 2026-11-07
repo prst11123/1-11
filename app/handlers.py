@@ -170,13 +170,17 @@ class AppHandler:
             return
         try:
             await self.send_offer(o, image_data=image_data, reply_to_message_id=source_id,
-                                  prefer_edit_source=True, source_kind=(media_kind if supplied else "text"))
+                                  prefer_edit_source=bool(supplied) or self.cfg.business_edit_text,
+                                  source_kind=(media_kind if supplied else "text"))
         except (DomainError, TelegramError) as e:
+            reason = str(e).replace(self.cfg.bot_token, "[REDACTED]")
+            log.warning("business_offer_failed offer_id=%s reason=%s", o.id, reason)
             fresh = await self.db("offer",o.id)
             if fresh and fresh.delivery_status == "unknown":
                 await self._notify_owner(actor,
                     "⚠️ Неясный результат Telegram API. Проверьте этот чат перед новой попыткой: "
-                    "сообщение могло уже измениться. Автоматически не дублирую офер.")
+                    "сообщение могло уже измениться. Автоматически не дублирую офер.\n"
+                    f"Диагностика: {rnd.h(reason)}")
             else:
                 await self._notify_owner(actor, f"❌ Не удалось отправить DEMO Offer: {rnd.h(e)}")
 

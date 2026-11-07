@@ -127,7 +127,7 @@ async def test_admin_faq_edit_full_flow(config,v5_store):
         assert s.query(AdminAudit).filter_by(action='FAQ_UPDATED').count()==1
 
 @pytest.mark.asyncio
-async def test_business_demo_trigger_edits_own_message_without_fragment(config,v5_store):
+async def test_business_demo_trigger_sends_photo_without_fragment_or_text_edit(config,v5_store):
     """Owner can test from an authorized Business chat using an explicit trigger."""
     from datetime import datetime,timezone
     class BizBot(Bot):
@@ -150,11 +150,14 @@ async def test_business_demo_trigger_edits_own_message_without_fragment(config,v
     await h.dispatch({"update_id":803,"business_message":{
         "business_connection_id":"biz-a","message_id":31,"date":ts,
         "chat":{"id":2002,"type":"private"},"from":{"id":1001},"text":"#тестофер"}})
-    assert len(bot.edits)==1
-    edit=bot.edits[0]
-    assert edit[0:4]==(2002,31,'biz-a','text')
-    assert edit[4].startswith(b'\xff\xd8')  # valid JPEG, not a remote website request
-    assert 'DEMO' in edit[5] and 'Бот от' not in edit[5]
+    assert bot.edits == []  # avoid uncertain text-to-media edits in live Business chats
+    assert len(bot.media) == 1
+    chat, caption, markup, options = bot.media[0]
+    assert chat == 2002 and options['business_id'] == 'biz-a'
+    assert options['reply_to_message_id'] == 31
+    assert options['image_data'].startswith(b'\xff\xd8')
+    assert 'DEMO' in caption and 'Бот от' not in caption
+    assert [b['text'] for row in markup['inline_keyboard'] for b in row] == ['✕ Отклонить', '✓ Принять']
 
 
 @pytest.mark.asyncio
