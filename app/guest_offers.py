@@ -11,7 +11,8 @@ import hmac
 from html import escape
 
 from .quick_offer import QuickOffer, parse_quick_offer
-from .states import default_gift_name, validate_gift_url, aware
+from .states import default_gift_name, validate_gift_url
+from .render import active_offer_caption
 
 _MENTION = re.compile(r"^@([A-Za-z0-9_]{5,32})(?:\s+|$)")
 
@@ -38,13 +39,12 @@ def guest_callback_token(secret: str, offer_id: int, query_id: str) -> str:
 
 def guest_caption(offer, status: str = "active", contact_username: str | None = None) -> str:
     """Clearly labelled demonstration, never a completed sale or payout."""
+    if status == "active":
+        return active_offer_caption(offer)
     heading = (f"🧪 <b>DEMO-офер</b>\n\n"
                f'🎁 <a href="{escape(offer.gift_url, quote=True)}"><b>{escape(offer.gift_name)}</b></a>\n'
                f"⭐ Предложение: <b>{int(offer.stars_amount):,} Stars (DEMO)</b>\n".replace(',', ' ')
                )
-    if status == 'active':
-        return heading + (f"⏳ Срок до: <b>{aware(offer.expires_at).strftime('%d.%m.%Y %H:%M UTC')}</b>\n\n"
-                          "Тестовый офер. NFT и Stars не переводятся.")
     if status == 'accepted':
         contact = f"\n🆘 Поддержка: @{escape(contact_username)}" if contact_username else ""
         return heading + "\n✅ <b>Принято (DEMO)</b>\nNFT не продан, Stars не начислены. Ничего не переводите." + contact

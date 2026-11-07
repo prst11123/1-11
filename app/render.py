@@ -28,7 +28,22 @@ def expiry_string(dt) -> str:
     return aware(dt).strftime("%d.%m.%Y %H:%M UTC")
 
 
+def active_offer_caption(o) -> str:
+    """Compact offer paragraph above the native NFT preview."""
+    stars = f"{int(o.stars_amount):,}".replace(",", " ")
+    caption = ("🧪 <b>DEMO</b>\n\n"
+               f"Пользователь предлагает вам <b>{stars} Stars</b> за подарок "
+               f'<a href="{h(o.gift_url)}">{h(o.gift_name)}</a>.\n\n'
+               f"⏳ Действует до: <b>{expiry_string(o.expires_at)}</b>\n"
+               "Тест: NFT и Stars не переводятся.")
+    if len(html.unescape(re.sub(r"<[^>]*>", "", caption))) > 1024:
+        raise ValueError("Подпись Offer слишком длинная")
+    return caption
+
+
 def offer_caption(o, preview=False, contact_username: str | None = None) -> str:
+    if o.status == "active":
+        return active_offer_caption(o)
     parts=["🧪 <b>DEMO · NFT Gift Offer</b>", "", f"🎁 <b>{h(o.gift_name)}</b>",
            f"🔗 {h(o.gift_url)}", f"⭐ Предложение: <b>{o.stars_amount:,} Stars</b>".replace(",", " "),
            f"⏳ Действует до: <b>{expiry_string(o.expires_at)}</b>",
