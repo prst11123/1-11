@@ -176,13 +176,15 @@ class AppHandler:
             reason = str(e).replace(self.cfg.bot_token, "[REDACTED]")
             log.warning("business_offer_failed offer_id=%s reason=%s", o.id, reason)
             fresh = await self.db("offer",o.id)
-            if fresh and fresh.delivery_status == "unknown":
+            if isinstance(e, TelegramError) and e.delivery_hint:
+                await self._notify_owner(actor, f"⚠️ {rnd.h(e.delivery_hint)}")
+            elif fresh and fresh.delivery_status == "unknown":
                 await self._notify_owner(actor,
                     "⚠️ Неясный результат Telegram API. Проверьте этот чат перед новой попыткой: "
                     "сообщение могло уже измениться. Автоматически не дублирую офер.\n"
                     f"Диагностика: {rnd.h(reason)}")
             else:
-                await self._notify_owner(actor, f"❌ Не удалось отправить DEMO Offer: {rnd.h(e)}")
+                await self._notify_owner(actor, f"❌ Не удалось отправить DEMO Offer: {rnd.h(reason)}")
 
     async def _notify_owner(self, user_id: int, text: str):
         try:
@@ -456,8 +458,10 @@ class AppHandler:
                                            image_data, offer.gift_image_file_id, caption, markup)
                     edited = True
                 except TelegramError as err:
-                    if err.status == 0:
-                        raise  # Telegram could have edited: do not risk duplicate
+                    if err.status == 0 or err.is_flood:
+                        # An ambiguous response can mean success. A flood error
+                        # must never trigger another delivery method or retry.
+                        raise
                     log.warning("business_edit_denied offer_id=%s status=%s, fallback to send",
                                 offer.id,err.status)
             if result is None:
@@ -757,7 +761,9 @@ class AppHandler:
                 result=await self.send_offer(offer)
             except (DomainError,TelegramError) as e:
                 fresh=await self.db("offer",offer.id)
-                if fresh.delivery_status=="unknown":
+                if isinstance(e, TelegramError) and e.delivery_hint:
+                    await self.say(uid, f"⚠️ {rnd.h(e.delivery_hint)}")
+                elif fresh.delivery_status=="unknown":
                     await self.say(uid,f"⚠️ Неясный результат Telegram API для Offer #{offer.id}. Проверьте чат и журнал перед повторной отправкой. Автоматическое дублирование запрещено.")
                 else:
                     await self.say(uid,f"❌ Ошибка отправки Offer #{offer.id}: {rnd.h(e)}\nПовтор можно выполнить через «Мои оферы» при доступном Target.")
@@ -841,6 +847,8 @@ class AppHandler:
                 await self.send_offer(o)
                 return await self.say(uid,f"✅ Offer #{o.id} отправлен")
             except (DomainError,TelegramError) as e:
+                if isinstance(e, TelegramError) and e.delivery_hint:
+                    return await self.say(uid, f"⚠️ {rnd.h(e.delivery_hint)}")
                 return await self.say(uid,f"⚠️ Не удалось отправить Offer #{o.id}: {rnd.h(e)}")
         raise DomainError("Неизвестная кнопка")
 

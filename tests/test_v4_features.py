@@ -123,6 +123,32 @@ async def test_uncertain_edit_never_duplicates_or_deletes(v4_store,config,monkey
     assert v4_store.offers_by_creator(1001)[1][0].delivery_status=="unknown"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("edit_first", [False, True])
+@pytest.mark.parametrize("status,description", [(400, "Bad Request: PEER_FLOOD"), (429, "Too Many Requests")])
+async def test_business_flood_does_not_retry_fallback_or_delete(v4_store, config, monkeypatch,
+                                                             edit_first, status, description):
+    config = config.model_copy(update={"business_edit_text": edit_first})
+    error = TelegramError("editMessageMedia" if edit_first else "sendPhoto", status, description, 30)
+    bot = EditingTelegram(edit_error=error)
+    msg = await setup_business(v4_store, bot)
+    async def jpeg(_):
+        return b"jpeg"
+    async def blocked_send(*args, **kwargs):
+        bot.operations.append(("send",))
+        raise error
+    monkeypatch.setattr("app.handlers.fetch_gift_image", jpeg)
+    bot.send_media = blocked_send
+    handler = AppHandler(config, v4_store, bot)
+    await handler.dispatch({"update_id": 13001, "business_message": msg})
+    await handler.dispatch({"update_id": 13002, "business_message": msg})
+    assert [op[0] for op in bot.operations] == ["edit" if edit_first else "send"]
+    assert v4_store.offers_by_creator(1001)[1][0].delivery_status == "failed"
+    assert len(bot.notifications) == 1
+    assert "Автоматических повторов нет" in bot.notifications[0][1]
+    assert ("@SpamBot" if status == 400 else "30 сек.") in bot.notifications[0][1]
+
+
 class InlineTelegram:
     def __init__(self):
         self.answers=[]

@@ -20,6 +20,21 @@ class TelegramError(Exception):
         self.method, self.status, self.description, self.retry_after = method, status, description, retry_after
         super().__init__(f"{method}: Telegram {status}: {description}")
 
+    @property
+    def is_flood(self) -> bool:
+        return self.status == 429 or "PEER_FLOOD" in self.description.upper()
+
+    @property
+    def delivery_hint(self) -> str | None:
+        if "PEER_FLOOD" in self.description.upper():
+            return ("Telegram ограничил отправку (PEER_FLOOD). Карточка не отправлена. "
+                    "Автоматических повторов нет. Проверьте ограничения аккаунта через "
+                    "официального @SpamBot. Повторите тест после снятия ограничения.")
+        if self.status == 429:
+            wait = f" Подождите {self.retry_after} сек." if self.retry_after else " Подождите перед новой попыткой."
+            return "Telegram ограничил частоту запросов. Автоматических повторов нет." + wait
+        return None
+
 
 class Telegram:
     def __init__(self, token: str, default_image_path: str = "app/assets/fallback.png"):

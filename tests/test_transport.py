@@ -53,3 +53,27 @@ async def test_api_error_is_not_success():
             await tg.send_message(2002,"Hello",business_id="b_test")
         await tg.close()
     assert exc.value.status==403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code,description", [(400, "Bad Request: PEER_FLOOD"), (429, "Too Many Requests")])
+async def test_delivery_flood_response_is_not_retried(code, description):
+    requests = []
+    async def reject(request):
+        requests.append(request.path)
+        return web.json_response({"ok": False, "error_code": code, "description": description,
+                                  "parameters": {"retry_after": 30}}, status=code)
+    app = web.Application()
+    app.router.add_post("/test/sendMessage", reject)
+    async with TestServer(app) as server:
+        tg = Telegram("unused")
+        await tg.start()
+        tg._base = str(server.make_url("/test/"))
+        try:
+            with pytest.raises(TelegramError) as exc:
+                await tg.send_message(2002, "DEMO", business_id="test")
+        finally:
+            await tg.close()
+    assert len(requests) == 1
+    assert exc.value.is_flood
+    assert exc.value.delivery_hint
