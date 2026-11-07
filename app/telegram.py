@@ -152,13 +152,6 @@ class Telegram:
         return await self.api("deleteBusinessMessages", business_connection_id=connection_id,
                               message_ids=[message_id])
 
-    async def edit_business_link_offer(self, chat_id: int, message_id: int, business_id: str,
-                                       text: str, markup, gift_url: str):
-        return await self.api("editMessageText", business_connection_id=business_id,
-                              chat_id=chat_id, message_id=message_id, text=text,
-                              parse_mode="HTML", reply_markup=markup,
-                              link_preview_options={"url": gift_url, "prefer_large_media": True})
-
     async def edit_test_caption(self, chat_id: int, message_id: int, caption: str, markup):
         return await self.api("editMessageCaption", chat_id=chat_id, message_id=message_id,
                               caption=caption, parse_mode="HTML", reply_markup=markup)
@@ -185,10 +178,6 @@ class Telegram:
                               link_preview_options={"prefer_large_media":True})
 
     async def edit_caption(self, offer, caption, markup):
-        if offer.media_kind == "text":
-            return await self.edit_business_link_offer(
-                offer.recipient_chat_id, offer.telegram_message_id,
-                offer.business_connection_id, caption, markup, offer.gift_url)
         return await self.api("editMessageCaption", business_connection_id=offer.business_connection_id,
                               chat_id=offer.recipient_chat_id, message_id=offer.telegram_message_id,
                               caption=caption, parse_mode="HTML", reply_markup=markup)
